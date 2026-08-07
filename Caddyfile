@@ -2,10 +2,15 @@
 # It terminates TLS (Let's Encrypt, obtained and renewed automatically) and
 # proxies WebSocket upgrades with no extra configuration.
 #
-# SITE_ADDRESS drives the certificate. Until a real domain exists, an
-# sslip.io name (e.g. 51-250-17-150.sslip.io) resolves to the server's IP and
-# Let's Encrypt will issue for it — real HTTPS with nothing purchased. Swapping
-# to a bought domain later is a one-line change plus a reload.
+# SITE_ADDRESS drives the certificate and may list SEVERAL names, comma or
+# space separated — Caddy obtains a certificate for each and serves the same
+# site on all of them. Listing the old name alongside the new one means a
+# rename is never a cutover: nothing that already works stops working.
+#
+# Until a real domain is bought, an sslip.io name (51-250-17-150.sslip.io)
+# resolves to the server's IP and Let's Encrypt issues for it, and a free
+# DuckDNS name gives something readable. Both are somebody else's domain, so
+# buy yukbor.uz before real users — that is the same one-line change again.
 
 # No global options block on purpose. `email {$ACME_EMAIL}` is a parse error
 # when the variable is empty — an unset directive is invalid, not a no-op — and
