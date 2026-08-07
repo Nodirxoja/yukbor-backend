@@ -4,6 +4,7 @@ import { Theme } from '@radix-ui/themes'
 import '@radix-ui/themes/styles.css'
 import './styles.css'
 import App from './App'
+import { Toaster } from './components/Toaster'
 
 // panelBackground="translucent" is Radix's built-in glass surface: every
 // Card/Table/panel gets a frosted, backdrop-blurred background (plan §11).
@@ -16,7 +17,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       panelBackground="translucent"
       hasBackground={false}
     >
-      <App />
+      <Toaster>
+        <App />
+      </Toaster>
     </Theme>
   </React.StrictMode>,
 )

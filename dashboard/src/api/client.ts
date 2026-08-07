@@ -2,38 +2,44 @@
 // without the backend. Set VITE_USE_MOCKS=false to hit the real gateway via
 // the /api dev proxy (see vite.config.ts).
 import type { AdminStats, Order, User } from './types'
+import { ApiError, loadSession } from './auth'
 import { computeStats, mockOrders, mockUsers } from '../mocks/data'
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
 
-// The admin endpoints require an admin-role JWT, and there are two ways it
-// gets attached — deliberately, because they have different threat models:
-//
-//   local dev  — scripts/seed.sh writes the token into dashboard/.env.local
-//                and Vite exposes it here.
-//   production — NO token is built in. Vite inlines every VITE_* value into
-//                the JavaScript bundle, which is served publicly, so a token
-//                baked in at build time is a token published to the world.
-//                Caddy holds it instead and injects the Authorization header
-//                server-side, behind basic auth (see docs/DEPLOY.md).
-//
-// So an empty token is normal in production: send no header and let the proxy
-// add it. A 401 then means the proxy is misconfigured, not the browser.
-const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN ?? ''
-
+/**
+ * Every admin request carries the token of the signed-in administrator — the
+ * one obtained by them logging in, held in sessionStorage for this tab only.
+ *
+ * Nothing is baked in at build time: Vite inlines VITE_* values into a bundle
+ * that is served publicly, so a token embedded there is a token given away.
+ */
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    headers: ADMIN_TOKEN ? { Authorization: `Bearer ${ADMIN_TOKEN}` } : {},
-  })
+  const session = loadSession()
+  if (!session) {
+    throw new ApiError('UNAUTHORIZED', 'Your session has ended. Sign in again.', 401)
+  }
+
+  let res: Response
+  try {
+    res = await fetch(`/api${path}`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+    })
+  } catch {
+    throw new ApiError('NETWORK', 'Cannot reach the server.', 0)
+  }
+
   if (res.status === 401 || res.status === 403) {
-    throw new Error(
-      ADMIN_TOKEN
-        ? `GET ${path} → ${res.status}: admin token expired or not an admin role`
-        : `GET ${path} → ${res.status}: no admin token reached the API — the reverse proxy should be injecting one`,
+    throw new ApiError(
+      'UNAUTHORIZED',
+      res.status === 403
+        ? 'This account is not an administrator.'
+        : 'Your session has expired. Sign in again.',
+      res.status,
     )
   }
   if (!res.ok) {
-    throw new Error(`GET ${path} → ${res.status}`)
+    throw new ApiError('REQUEST_FAILED', `Could not load data (${res.status}).`, res.status)
   }
   return res.json() as Promise<T>
 }

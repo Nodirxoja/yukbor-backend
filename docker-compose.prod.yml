@@ -130,12 +130,8 @@ services:
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS}
       ACME_EMAIL: ${ACME_EMAIL:-}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # Basic-auth credentials as Caddy config, not as env: a bcrypt hash's
-      # '$' characters are interpolated by Compose in .env AND env_file.
-      - ./caddy-auth.conf:/etc/caddy/auth.conf:ro
       - ./dashboard/dist:/srv/dashboard:ro
       - caddy_data:/data
       - caddy_config:/config

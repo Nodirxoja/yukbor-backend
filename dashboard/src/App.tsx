@@ -1,55 +1,174 @@
-import { useEffect, useState } from 'react'
-import { Box, Card, Flex, Grid, Heading, Tabs, Text } from '@radix-ui/themes'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Avatar,
+  Badge,
+  Box,
+  Button,
+  Card,
+  DropdownMenu,
+  Flex,
+  Grid,
+  Heading,
+  Tabs,
+  Text,
+} from '@radix-ui/themes'
+import { ExitIcon, ReloadIcon } from '@radix-ui/react-icons'
 import type { AdminStats, Order, User } from './api/types'
+import { ApiError, loadSession, logout as endSession } from './api/auth'
+import type { Session } from './api/auth'
 import { fetchOrders, fetchStats, fetchUsers } from './api/client'
+import { LoginScreen } from './components/LoginScreen'
+import { useToast } from './components/Toaster'
 import { StatsCards } from './components/StatsCards'
 import { OrdersTable } from './components/OrdersTable'
 import { UsersTable } from './components/UsersTable'
 import { OrdersMap } from './components/OrdersMap'
 
 const POLL_MS = 10_000 // back-office realtime: polling is fine (plan §11)
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
 
 export default function App() {
+  // Mock mode has no backend to sign in against, so it skips the gate.
+  const [session, setSession] = useState<Session | null>(() => (USE_MOCKS ? null : loadSession()))
+  const [authed, setAuthed] = useState(USE_MOCKS || Boolean(loadSession()))
+
+  if (!authed) {
+    return (
+      <LoginScreen
+        onSignedIn={(s) => {
+          setSession(s)
+          setAuthed(true)
+        }}
+      />
+    )
+  }
+  return (
+    <Dashboard
+      session={session}
+      onSignedOut={() => {
+        endSession(session)
+        setSession(null)
+        setAuthed(false)
+      }}
+    />
+  )
+}
+
+function Dashboard({
+  session,
+  onSignedOut,
+}: {
+  session: Session | null
+  onSignedOut: () => void
+}) {
+  const toast = useToast()
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [lastSync, setLastSync] = useState<Date | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(
+    async (alive: () => boolean) => {
+      try {
+        const [s, o, u] = await Promise.all([fetchStats(), fetchOrders(), fetchUsers()])
+        if (!alive()) return
+        setStats(s)
+        setOrders(o)
+        setUsers(u)
+        setLastSync(new Date())
+      } catch (e) {
+        if (!alive()) return
+        const err = e as ApiError
+        // An expired session should return you to the sign-in screen, not
+        // leave a dashboard quietly showing data that stopped updating.
+        if (err.status === 401 || err.status === 403) {
+          toast.error('Signed out', err.message)
+          onSignedOut()
+          return
+        }
+        toast.error('Could not refresh', err.message)
+      } finally {
+        if (alive()) setLoading(false)
+      }
+    },
+    [toast, onSignedOut],
+  )
 
   useEffect(() => {
-    let alive = true
-    const load = () =>
-      Promise.all([fetchStats(), fetchOrders(), fetchUsers()])
-        .then(([s, o, u]) => {
-          if (!alive) return
-          setStats(s)
-          setOrders(o)
-          setUsers(u)
-          setError(null)
-        })
-        .catch((e: unknown) => alive && setError(String(e)))
-    load()
-    const t = setInterval(load, POLL_MS)
+    let mounted = true
+    const alive = () => mounted
+    void load(alive)
+    const t = setInterval(() => void load(alive), POLL_MS)
     return () => {
-      alive = false
+      mounted = false
       clearInterval(t)
     }
-  }, [])
+  }, [load])
+
+  const initials = session?.user.fullName
+    ? session.user.fullName
+        .split(' ')
+        .slice(0, 2)
+        .map((p) => p[0])
+        .join('')
+    : 'A'
 
   return (
     <Box p="4" style={{ maxWidth: 1400, margin: '0 auto' }}>
-      <Flex justify="between" align="center" mb="4">
-        <Heading size="6">YUK BOR — Admin Dashboard</Heading>
-        <Text size="1" color="gray">
-          {import.meta.env.VITE_USE_MOCKS !== 'false' ? 'mock data' : 'live'} · refresh {POLL_MS / 1000}s
-        </Text>
-      </Flex>
+      <Flex justify="between" align="center" mb="4" gap="3">
+        <Flex direction="column">
+          <Heading size="6">YUK BOR</Heading>
+          <Text size="1" color="gray">
+            Admin dashboard
+          </Text>
+        </Flex>
 
-      {error && (
-        <Text color="red" size="2">
-          {error}
-        </Text>
-      )}
+        <Flex align="center" gap="3">
+          <Flex align="center" gap="2">
+            {loading ? (
+              <Text size="1" color="gray">
+                <ReloadIcon />
+              </Text>
+            ) : null}
+            <Text size="1" color="gray">
+              {USE_MOCKS
+                ? 'mock data'
+                : lastSync
+                  ? `updated ${lastSync.toLocaleTimeString()}`
+                  : 'connecting'}
+            </Text>
+          </Flex>
+
+          {session && (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger>
+                <Button variant="soft" color="gray">
+                  <Avatar size="1" fallback={initials} radius="full" />
+                  {session.user.fullName}
+                  <DropdownMenu.TriggerIcon />
+                </Button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content>
+                <DropdownMenu.Label>
+                  <Flex direction="column" gap="1">
+                    <Text size="1">{session.user.phoneNumber}</Text>
+                    <Badge size="1" variant="soft">
+                      {session.user.role}
+                    </Badge>
+                  </Flex>
+                </DropdownMenu.Label>
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item color="red" onSelect={onSignedOut}>
+                  <ExitIcon />
+                  Sign out
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+          )}
+        </Flex>
+      </Flex>
 
       {stats && (
         <Box mb="4">
