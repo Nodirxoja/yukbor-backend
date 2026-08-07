@@ -352,17 +352,29 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.VerificationID != "" {
+	// Proof that the caller holds this number. The contract sends only
+	// phoneNumber, so when no verificationId is supplied we look up whether
+	// this phone completed an OTP recently rather than rejecting the request —
+	// same guarantee, and the contract stays frozen (see store.RecentlyVerified).
+	switch {
+	case req.VerificationID != "":
 		phone, err := h.store.VerifiedPhone(r.Context(), req.VerificationID)
 		if err != nil || phone != req.PhoneNumber {
 			httpx.WriteError(w, http.StatusUnauthorized, httpx.CodeOTPNotVerified,
 				"phone not confirmed")
 			return
 		}
-	} else if h.cfg.IsProd() {
-		httpx.WriteError(w, http.StatusUnauthorized, httpx.CodeOTPNotVerified,
-			"verificationId from a confirmed OTP is required")
-		return
+	case h.cfg.IsProd():
+		ok, err := h.store.RecentlyVerified(r.Context(), req.PhoneNumber)
+		if err != nil {
+			h.fail(w, "check recent verification", err)
+			return
+		}
+		if !ok {
+			httpx.WriteError(w, http.StatusUnauthorized, httpx.CodeOTPNotVerified,
+				"подтвердите номер телефона по SMS перед входом")
+			return
+		}
 	}
 
 	user, err := h.store.UserByPhone(r.Context(), req.PhoneNumber)

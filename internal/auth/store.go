@@ -144,6 +144,29 @@ func (s *Store) VerifyOTP(ctx context.Context, verificationID, code string, allo
 	return err
 }
 
+// LoginWindow is how long a confirmed OTP still authorises a login.
+const LoginWindow = 15 * time.Minute
+
+// RecentlyVerified reports whether this phone completed an OTP verification
+// within the login window.
+//
+// This exists because the API contract is frozen: POST /auth/login carries only
+// phoneNumber, so the client cannot echo back a verificationId. Demanding one
+// would have made the iOS app unable to log in at all. Looking the recent
+// verification up server-side gives the same guarantee — you cannot sign in
+// unless somebody just proved they hold that number — while the request body
+// stays exactly as the contract specifies.
+func (s *Store) RecentlyVerified(ctx context.Context, phone string) (bool, error) {
+	var ok bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM auth.otp_codes
+			WHERE phone_number = $1 AND verified = TRUE
+			  AND created_at > now() - $2::interval)`,
+		phone, fmt.Sprintf("%d seconds", int(LoginWindow.Seconds()))).Scan(&ok)
+	return ok, err
+}
+
 // VerifiedPhone returns the phone a verification id proves ownership of.
 func (s *Store) VerifiedPhone(ctx context.Context, verificationID string) (string, error) {
 	var phone string
