@@ -23,8 +23,11 @@ export VITE_USE_MOCKS=false
 if command -v npm >/dev/null 2>&1; then
   npm ci --silent && npm run build
 else
-  # No node on the server: build in a throwaway container.
-  docker run --rm -e VITE_USE_MOCKS=false -v "$PWD":/app -w /app node:20-alpine \
+  # No node on the server: build in a throwaway container. Run it as the host
+  # user, or dist/ comes out root-owned and every later step — copying the API
+  # reference in, the next deploy's rebuild — fails with permission denied.
+  docker run --rm -e VITE_USE_MOCKS=false -e HOME=/tmp \
+    -u "$(id -u):$(id -g)" -v "$PWD":/app -w /app node:20-alpine \
     sh -c 'npm ci --silent && npm run build'
 fi
 
