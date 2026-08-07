@@ -1,4 +1,4 @@
-import { Badge, Table } from '@radix-ui/themes'
+import { Badge, Flex, Table, Text } from '@radix-ui/themes'
 import type { User, UserRole, VerificationStatus } from '../api/types'
 
 const roleColor: Record<UserRole, React.ComponentProps<typeof Badge>['color']> = {
@@ -25,6 +25,7 @@ export function UsersTable({ users }: { users: User[] }) {
           <Table.ColumnHeaderCell>Phone</Table.ColumnHeaderCell>
           <Table.ColumnHeaderCell>Role</Table.ColumnHeaderCell>
           <Table.ColumnHeaderCell>Verification</Table.ColumnHeaderCell>
+          <Table.ColumnHeaderCell>Licence</Table.ColumnHeaderCell>
           <Table.ColumnHeaderCell align="right">Rating</Table.ColumnHeaderCell>
         </Table.Row>
       </Table.Header>
@@ -39,12 +40,38 @@ export function UsersTable({ users }: { users: User[] }) {
               </Badge>
             </Table.Cell>
             <Table.Cell>
-              <Badge color={verColor[u.verificationStatus]} variant="soft">
-                {u.verificationStatus}
-              </Badge>
+              <Flex direction="column" gap="1" align="start">
+                <Badge color={verColor[u.verificationStatus]} variant="soft">
+                  {u.verificationStatus}
+                </Badge>
+                {u.rejectionReason && (
+                  <Text size="1" color="red">
+                    {u.rejectionReason}
+                  </Text>
+                )}
+              </Flex>
+            </Table.Cell>
+            <Table.Cell>
+              {u.licenseNumber ? (
+                <Flex direction="column" gap="1" align="start">
+                  <Text size="1">
+                    {u.licenseNumber}
+                    {u.licenseCategories?.length ? ` · ${u.licenseCategories.join('/')}` : ''}
+                  </Text>
+                  {u.vehiclePlate && (
+                    <Text size="1" color="gray">
+                      {u.vehiclePlate}
+                    </Text>
+                  )}
+                </Flex>
+              ) : (
+                <Text size="1" color="gray">
+                  —
+                </Text>
+              )}
             </Table.Cell>
             <Table.Cell align="right">
-              {u.ratingsCount > 0 ? `★ ${u.rating.toFixed(1)} (${u.ratingsCount})` : '—'}
+              {u.ratingsCount > 0 ? `${u.rating.toFixed(1)} (${u.ratingsCount})` : '—'}
             </Table.Cell>
           </Table.Row>
         ))}

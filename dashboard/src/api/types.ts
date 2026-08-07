@@ -32,6 +32,9 @@ export type OrderStatus =
 
 export type TransactionStatus = 'held' | 'released' | 'refunded'
 
+// GET /admin/users returns UserDetail: the contract's User plus the fields the
+// back office needs — when they registered, the licence the registry issued,
+// and why an applicant was rejected. PINFL and passport data never leave auth.
 export interface User {
   id: string
   role: UserRole
@@ -43,6 +46,10 @@ export interface User {
   rating: number
   ratingsCount: number
   createdAt?: string
+  licenseNumber?: string | null
+  licenseCategories?: string[] | null
+  vehiclePlate?: string | null
+  rejectionReason?: string | null
 }
 
 export interface Location {

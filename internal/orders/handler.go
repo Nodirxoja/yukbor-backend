@@ -60,6 +60,9 @@ func (h *Handler) Routes() http.Handler {
 		httpx.AuthedRole(secret, []string{string(models.RoleAdmin)}, h.adminOrders))
 	mux.HandleFunc("GET /internal/orders/stats",
 		httpx.InternalOnly(h.cfg.InternalToken, h.internalStats))
+	// Reviews checks an order is really completed before accepting a review.
+	mux.HandleFunc("GET /internal/orders/{id}",
+		httpx.InternalOnly(h.cfg.InternalToken, h.internalOrder))
 
 	return httpx.Wrap(mux)
 }
@@ -321,8 +324,8 @@ func (h *Handler) accept(w http.ResponseWriter, r *http.Request) {
 	}
 	order := updated.Flatten()
 
-	h.emit([]string{rec.ClientID, req.ExecutorID}, models.EventOrderUpdated, order,
-		&models.NotifySpec{
+	h.emitTo([]string{rec.ClientID, req.ExecutorID}, []string{rec.ClientID},
+		models.EventOrderUpdated, order, &models.NotifySpec{
 			Type:           models.NotifNewOrderMatch,
 			Title:          "Исполнитель найден",
 			Body:           req.ExecutorName + " принял ваш заказ",
@@ -405,8 +408,8 @@ func (h *Handler) updateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	order := updated.Flatten()
-	h.emit([]string{rec.ClientID, claims.Sub}, models.EventOrderUpdated, order,
-		&models.NotifySpec{
+	h.emitTo([]string{rec.ClientID, claims.Sub}, []string{rec.ClientID},
+		models.EventOrderUpdated, order, &models.NotifySpec{
 			Type:           models.NotifOrderStatusChanged,
 			Title:          "Статус заказа обновлён",
 			Body:           statusText(req.Leg, req.Status),
@@ -455,12 +458,13 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	order := updated.Flatten()
-	h.emit(participants(rec), models.EventOrderUpdated, order, &models.NotifySpec{
-		Type:           models.NotifOrderStatusChanged,
-		Title:          "Заказ отменён",
-		Body:           "Клиент отменил заказ" + refundNote(refunded),
-		RelatedOrderID: &rec.ID,
-	})
+	h.emitTo(participants(rec), counterparties(rec, claims.Sub),
+		models.EventOrderUpdated, order, &models.NotifySpec{
+			Type:           models.NotifOrderStatusChanged,
+			Title:          "Заказ отменён",
+			Body:           "Клиент отменил заказ" + refundNote(refunded),
+			RelatedOrderID: &rec.ID,
+		})
 	httpx.WriteJSON(w, http.StatusOK, order)
 }
 
@@ -563,6 +567,15 @@ func (h *Handler) adminOrders(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, flattenAll(recs))
 }
 
+func (h *Handler) internalOrder(w http.ResponseWriter, r *http.Request) {
+	rec, err := h.load(w, r)
+	if rec == nil {
+		return
+	}
+	_ = err
+	httpx.WriteJSON(w, http.StatusOK, rec.Flatten())
+}
+
 func (h *Handler) internalStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.store.Stats(r.Context())
 	if err != nil {
@@ -591,9 +604,31 @@ func (h *Handler) load(w http.ResponseWriter, r *http.Request) (*OrderRecord, er
 // emit pushes a realtime event, and optionally a stored notification. It is
 // fire-and-forget: a notification failure must never fail an order update.
 func (h *Handler) emit(userIDs []string, event string, data any, notify *models.NotifySpec) {
+	h.emitTo(userIDs, nil, event, data, notify)
+}
+
+// emitTo separates the two audiences: everyone in userIDs gets the state event
+// so their screen updates, but only notifyUserIDs get the notification. The
+// actor should not be told about their own action.
+func (h *Handler) emitTo(userIDs, notifyUserIDs []string, event string, data any, notify *models.NotifySpec) {
 	h.notify.Fire("/internal/events", models.EmitEventRequest{
-		UserIDs: dedupe(userIDs), Event: event, Data: data, Notify: notify,
+		UserIDs:       dedupe(userIDs),
+		Event:         event,
+		Data:          data,
+		Notify:        notify,
+		NotifyUserIDs: dedupe(notifyUserIDs),
 	})
+}
+
+// counterparties is everyone on an order EXCEPT the person who acted.
+func counterparties(rec *OrderRecord, actor string) []string {
+	out := []string{}
+	for _, id := range participants(rec) {
+		if id != actor {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (h *Handler) fail(w http.ResponseWriter, op string, err error) {

@@ -9,9 +9,10 @@ import (
 // Hub is an in-memory per-user event fan-out. The WS handler subscribes a
 // connection to its userId channel; services publish via /internal/events.
 //
-// TODO(day-3): pair with a real websocket upgrade (nhooyr.io/websocket or
-// gorilla/websocket — stdlib has no WS server). Single-instance in-memory is
-// fine for the hackathon; a broker only becomes necessary with >1 replica.
+// In-memory is correct here rather than merely expedient: every event is also
+// persisted as a notification row, so a client that was disconnected catches up
+// over REST. The hub is an accelerator, not the system of record. It would need
+// a broker only to run more than one replica.
 type Hub struct {
 	mu   sync.RWMutex
 	subs map[string][]chan models.WSEvent // userId → subscriber channels
@@ -51,7 +52,16 @@ func (h *Hub) Publish(userIDs []string, ev models.WSEvent) {
 			select {
 			case ch <- ev:
 			default:
+				// Dropping beats blocking the emitting service: the row is in
+				// the database either way.
 			}
 		}
 	}
+}
+
+// Count reports a user's live connections (logging and diagnostics).
+func (h *Hub) Count(userID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.subs[userID])
 }

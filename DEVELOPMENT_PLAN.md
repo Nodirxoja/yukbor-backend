@@ -51,7 +51,7 @@ Constraints chosen for the hackathon:
 | auth | 8081 | users, OTP, MyID KYC, tokens, verification status | `/auth/otp/request`, `/auth/otp/verify`, `/auth/myid/verify`, `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `GET/PATCH /users/me` |
 | orders | 8082 | orders, legs, statuses, backhaul search | `POST/GET /orders`, `/orders/available`, `/orders/{id}`, `/accept`, `/status`, `/cancel`, `/confirm-completion`, `/orders/backhaul` |
 | wallet | 8083 | escrow transactions | `POST /wallet/transactions`, `/wallet/transactions/release`, `GET /wallet/transactions` |
-| notifications | 8084 | notifications, WebSocket hub | `GET /notifications`, `PATCH /notifications/{id}/read`, `GET /ws?userId=` + internal `POST /internal/events` |
+| notifications | 8084 | notifications, WebSocket hub | `GET /notifications`, `PATCH /notifications/{id}/read`, `GET /ws?token=` + internal `POST /internal/events` |
 | reviews | 8085 | reviews, rating aggregates | `POST /reviews`, `GET /reviews/rating` |
 
 Why 5 services and not 8: at hackathon scale, each service should map to one bounded context from the contract, nothing smaller. Users live inside auth (they share the identity lifecycle). Reviews stay separate only because their aggregate feeds `User.rating` asynchronously — and it is the easiest service to hand to a second developer.
@@ -174,7 +174,7 @@ far more convincing than one that only ever succeeds.
 | Integration | Interface (seam) | MVP simulation — how it looks real | Deterministic failure trigger (for demo) |
 |---|---|---|---|
 | MyID KYC | `MyIDClient` (`internal/auth/verification.go`) | ~2s artificial latency (matches iOS mock), returns `confidence 0.93–0.99`, `verifiedFullName` derived from passport data; full token TTL/consume flow is real | passport number `0000000` → `PASSPORT_NOT_FOUND`; PINFL starting `99` → `FACE_MISMATCH` |
-| Driver license registry | `LicenseVerifier` (same file) | returns a category set by PINFL and validates it against the requested vehicle (trucks → C, tractorTrailer → CE); approved drivers proceed to truck selection | PINFL ending in odd digit → license has only `["B"]` → `LICENSE_CATEGORY_MISMATCH`, registration rejected |
+| Driver license registry | `LicenseVerifier` (same file) | returns a category set by PINFL and validates it against the requested vehicle (trucks → C, tractorTrailer → CE); also issues a licence number and an Uzbek plate derived from the PINFL. Enforced TWICE: role-level `C` at registration, and `CE` again when a driver accepts a tractor-trailer leg | PINFL last digit odd → `["B"]` → rejected at registration; **0/2/4 → `["B","C"]` → registers fine but refused a tractor-trailer load**; 6/8 → `["B","C","CE"]`. Without the middle bucket the accept-time gate could never fire |
 | SMS OTP | `SMSSender` (`internal/auth/otp.go`) | code logged server-side AND (demo trick) accept master code `7777` in non-prod so on-stage registration never stalls | request >3 codes in 10 min → rate-limit error |
 | Payments Payme/Click/Uzcard | `PaymentProvider` (wallet) | simulated charge with ~1.5s latency and a fake provider reference (`payme_txn_...`) stored on the transaction; hold/release/refund ledger is fully real | amount `999999999` → `PAYMENT_DECLINED` |
 | Price estimate | `POST /orders/estimate` | the exact client formula server-side (weight × tariff + equipment hrs × rate + workers × hrs × rate, min 100 000 UZS), tariffs in a config table so they can be "updated live" during Q&A | — |

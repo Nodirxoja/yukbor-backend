@@ -6,15 +6,26 @@ import { computeStats, mockOrders, mockUsers } from '../mocks/data'
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
 
+// The admin endpoints require an admin-role JWT. A back office does not need
+// its own login flow for a hackathon: scripts/seed.sh registers the admin and
+// writes the token into dashboard/.env.local, which Vite exposes here.
+const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN ?? ''
+
 async function get<T>(path: string): Promise<T> {
+  if (!ADMIN_TOKEN) {
+    throw new Error(
+      'VITE_ADMIN_TOKEN is not set — run ./scripts/seed.sh, or start with VITE_USE_MOCKS=true',
+    )
+  }
   const res = await fetch(`/api${path}`, {
-    headers: {
-      // TODO(day-3): real admin login flow; for the hackathon a seeded
-      // admin JWT in localStorage-free memory or an env var is enough.
-      Authorization: `Bearer ${import.meta.env.VITE_ADMIN_TOKEN ?? ''}`,
-    },
+    headers: { Authorization: `Bearer ${ADMIN_TOKEN}` },
   })
-  if (!res.ok) throw new Error(`GET ${path} → ${res.status}`)
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`GET ${path} → ${res.status}: admin token missing, expired or not an admin`)
+  }
+  if (!res.ok) {
+    throw new Error(`GET ${path} → ${res.status}`)
+  }
   return res.json() as Promise<T>
 }
 

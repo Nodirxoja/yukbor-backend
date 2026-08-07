@@ -18,9 +18,24 @@ type EmitEventRequest struct {
 	Event   string   `json:"event"`
 	Data    any      `json:"data"`
 
-	// Notify, when set, also writes a notifications row per user and pushes a
-	// notification.created event alongside Event. Omit for pure state pushes.
+	// Notify, when set, also writes a notifications row and pushes a
+	// notification.created event. Omit for pure state pushes.
 	Notify *NotifySpec `json:"notify,omitempty"`
+
+	// NotifyUserIDs narrows who gets the NOTIFICATION, while UserIDs still all
+	// get the state event. These are different audiences: every participant
+	// needs the updated object so their screen is correct, but only the
+	// counterparty should be told "Driver accepted your order" — notifying
+	// someone about their own action reads as a bug. Defaults to UserIDs.
+	NotifyUserIDs []string `json:"notifyUserIds,omitempty"`
+}
+
+// NotifyRecipients resolves who should receive the stored notification.
+func (r EmitEventRequest) NotifyRecipients() []string {
+	if len(r.NotifyUserIDs) > 0 {
+		return r.NotifyUserIDs
+	}
+	return r.UserIDs
 }
 
 type NotifySpec struct {
