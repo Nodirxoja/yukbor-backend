@@ -14,6 +14,15 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../dashboard"
 
+# Docker recreates a missing bind-mount source as root, so dist/ can end up
+# owned by root after a container restart — and then the build writes nothing
+# and says almost nothing about why. Check it up front.
+if [ -d dist ] && [ ! -w dist ]; then
+  echo "  dist/ is not writable by $(whoami) — Docker recreated it as root."
+  echo "  Fix with: sudo chown -R \$(id -u):\$(id -g) $(pwd)/dist"
+  exit 1
+fi
+
 echo "==> removing any local dev env (it would be inlined into a public bundle)"
 rm -f .env.local .env.production.local
 
