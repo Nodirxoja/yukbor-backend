@@ -179,7 +179,22 @@ curl -sS -X POST "$BASE/orders/$CAN/cancel" -H "Authorization: Bearer $CLIENT_T"
 echo "    1 cancelled order"
 
 # ---- hand the dashboard its token --------------------------------------
+# Local development only. In production the dashboard is built with NO token
+# (a Vite VITE_* value is inlined into a public bundle) and Caddy injects the
+# Authorization header server-side instead — see docs/DEPLOY.md.
 printf 'VITE_USE_MOCKS=false\nVITE_ADMIN_TOKEN=%s\n' "$ADMIN_T" > "$REPO/dashboard/.env.local"
+
+# Ids and tokens for scripting — used by seed-prod.sh to mint a long-lived
+# admin token, since the one issued above expires in 24h.
+umask 077
+cat > "$REPO/.seed-tokens" <<EOF
+CLIENT_ID=$CLIENT_ID
+DRIVER_ID=$DRV1_ID
+ADMIN_ID=$ADMIN_ID
+CLIENT_TOKEN=$CLIENT_T
+DRIVER_TOKEN=$DRV1_T
+ADMIN_TOKEN=$ADMIN_T
+EOF
 
 echo
 echo "done. dashboard/.env.local written — 'make dashboard' now shows live data."

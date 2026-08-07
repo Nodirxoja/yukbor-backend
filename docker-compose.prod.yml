@@ -1,0 +1,143 @@
+# Production stack. Deliberately STANDALONE rather than an override of
+# docker-compose.yml: an override file cannot remove a published port (Compose
+# merges port lists), and "the dev Postgres port is still open in production"
+# is exactly the kind of thing that must not depend on merge semantics.
+#
+# Every secret comes from .env, which is generated on the server by
+# scripts/server-setup.sh and never committed.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+
+name: yukbor
+
+x-service-env: &service-env
+  DATABASE_URL: postgres://yukbor:${POSTGRES_PASSWORD}@postgres:5432/yukbor?sslmode=disable
+  JWT_SECRET: ${JWT_SECRET}
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+  # prod removes the OTP devCode from responses, disables the 7777 master
+  # code, and makes verificationId mandatory on login.
+  APP_ENV: ${APP_ENV:-prod}
+  AUTH_URL: http://auth:8081
+  ORDERS_URL: http://orders:8082
+  WALLET_URL: http://wallet:8083
+  NOTIFICATIONS_URL: http://notifications:8084
+  REVIEWS_URL: http://reviews:8085
+
+x-service: &service
+  environment: *service-env
+  restart: unless-stopped
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+  logging: &logging
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: yukbor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: yukbor
+    # NO published ports. Postgres is reachable only on the compose network.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yukbor"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  migrate:
+    build: { context: ., args: { SERVICE: migrate } }
+    environment: *service-env
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging: *logging
+
+  auth:
+    <<: *service
+    build: { context: ., args: { SERVICE: auth } }
+    healthcheck: &health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  orders:
+    <<: *service
+    build: { context: ., args: { SERVICE: orders } }
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/health || exit 1"]
+
+  wallet:
+    <<: *service
+    build: { context: ., args: { SERVICE: wallet } }
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/health || exit 1"]
+
+  notifications:
+    <<: *service
+    build: { context: ., args: { SERVICE: notifications } }
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/health || exit 1"]
+
+  reviews:
+    <<: *service
+    build: { context: ., args: { SERVICE: reviews } }
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8085/health || exit 1"]
+
+  gateway:
+    build: { context: ., args: { SERVICE: gateway } }
+    environment: *service-env
+    restart: unless-stopped
+    # Bound to loopback ONLY: the internet reaches the API through Caddy,
+    # which terminates TLS. Publishing to 127.0.0.1 still lets us curl it
+    # from an SSH session when something needs debugging.
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      auth: { condition: service_healthy }
+      orders: { condition: service_healthy }
+      wallet: { condition: service_healthy }
+      notifications: { condition: service_healthy }
+      reviews: { condition: service_healthy }
+    logging: *logging
+
+  # TLS terminator and the only thing exposed to the internet. Caddy obtains
+  # and renews Let's Encrypt certificates by itself, and proxies WebSocket
+  # upgrades without extra configuration.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      DASH_USER: ${DASH_USER:-admin}
+      DASH_PASSWORD_HASH: ${DASH_PASSWORD_HASH:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./dashboard/dist:/srv/dashboard:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - gateway
+    logging: *logging
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

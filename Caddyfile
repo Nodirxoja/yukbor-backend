@@ -1,0 +1,70 @@
+# Caddy sits in front of everything and is the only thing on the internet.
+# It terminates TLS (Let's Encrypt, obtained and renewed automatically) and
+# proxies WebSocket upgrades with no extra configuration.
+#
+# SITE_ADDRESS drives the certificate. Until a real domain exists, an
+# sslip.io name (e.g. 51-250-17-150.sslip.io) resolves to the server's IP and
+# Let's Encrypt will issue for it — real HTTPS with nothing purchased. Swapping
+# to a bought domain later is a one-line change plus a reload.
+
+{
+	email {$ACME_EMAIL}
+	servers {
+		# The iOS app and the dashboard are not same-origin with the API.
+		protocols h1 h2
+	}
+}
+
+{$SITE_ADDRESS} {
+	encode gzip
+
+	log {
+		output stdout
+		format console
+	}
+
+	# ---- admin surface -------------------------------------------------
+	# /admin/* is already gated by an admin-role JWT in the services, but it
+	# is also the whole business's back office, so it gets a second lock and
+	# never has a token in front-end JavaScript.
+	#
+	# Caddy injects the admin JWT server-side: the browser authenticates with
+	# basic auth and never receives the bearer token, so reading the JS bundle
+	# reveals nothing. This is why the dashboard is built with no token baked
+	# in — a Vite VITE_* value is inlined into a PUBLIC bundle.
+	@admin path /admin/* /api/admin/*
+	handle @admin {
+		basic_auth {
+			{$DASH_USER} {$DASH_PASSWORD_HASH}
+		}
+		uri strip_prefix /api
+		reverse_proxy gateway:8080 {
+			header_up Authorization "Bearer {$ADMIN_TOKEN}"
+		}
+	}
+
+	# ---- the iOS app's surface ------------------------------------------
+	@api path /auth/* /users/* /orders /orders/* /wallet/* \
+		/notifications /notifications/* /reviews /reviews/* \
+		/ws /health /health/*
+	handle @api {
+		reverse_proxy gateway:8080
+	}
+
+	# The dashboard calls /api/* by convention (same as the Vite dev proxy),
+	# so strip the prefix and forward. Admin paths were already handled above.
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy gateway:8080
+	}
+
+	# ---- the dashboard ---------------------------------------------------
+	# Static SPA. try_files sends unknown paths to index.html so client-side
+	# routing works; if dist/ is empty this simply 404s, which is what we want
+	# before the dashboard has been built.
+	handle {
+		root * /srv/dashboard
+		try_files {path} /index.html
+		file_server
+	}
+}
