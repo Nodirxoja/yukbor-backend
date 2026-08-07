@@ -7,13 +7,10 @@
 # Let's Encrypt will issue for it — real HTTPS with nothing purchased. Swapping
 # to a bought domain later is a one-line change plus a reload.
 
-{
-	email {$ACME_EMAIL}
-	servers {
-		# The iOS app and the dashboard are not same-origin with the API.
-		protocols h1 h2
-	}
-}
+# No global options block on purpose. `email {$ACME_EMAIL}` is a parse error
+# when the variable is empty — an unset directive is invalid, not a no-op — and
+# it crash-loops the whole proxy. Caddy obtains certificates perfectly well
+# without a contact address; add one deliberately if you want expiry notices.
 
 {$SITE_ADDRESS} {
 	encode gzip
