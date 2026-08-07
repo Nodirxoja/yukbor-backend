@@ -89,7 +89,7 @@ func (SimulatedMyIDClient) VerifyPerson(ctx context.Context, req MyIDVerifyReque
 	return MyIDVerifyResult{
 		IsMatched:        true,
 		Confidence:       confidence,
-		VerifiedFullName: "Verified User " + req.PassportSeries + req.PassportNumber,
+		VerifiedFullName: SimulatedFullName(req.PINFL),
 	}, nil
 }
 
@@ -114,12 +114,30 @@ type LicenseVerificationRequest struct {
 	// What the applicant wants to operate — drives the category check.
 	VehicleType   *models.VehicleType
 	EquipmentType *models.EquipmentType
+	// RequiredCategory is the direct form, used at registration where the
+	// contract gives us a role but not a specific vehicle. Ignored when
+	// VehicleType is set.
+	RequiredCategory string
 }
 
 type LicenseResult struct {
 	Status     models.VerificationStatus
 	Categories []string // e.g. ["B", "C", "CE"]
 	Reason     string   // e.g. "LICENSE_CATEGORY_MISMATCH"
+
+	// Issued by the registry lookup. iOS never sends these — the contract is
+	// frozen — so the backend derives them from the PINFL (see license.go).
+	LicenseNumber string // AB1234567
+	VehiclePlate  string // "01 123 ABC" or "01 A 123 BC"
+}
+
+// requiredCategory resolves what the applicant must hold: an explicit vehicle
+// type wins, otherwise the role-level requirement passed by the caller.
+func (r LicenseVerificationRequest) requiredCategory() string {
+	if r.VehicleType != nil {
+		return RequiredLicenseCategory(*r.VehicleType)
+	}
+	return r.RequiredCategory
 }
 
 // RequiredLicenseCategory maps vehicle types to the license category a driver
@@ -156,15 +174,20 @@ func (SimulatedLicenseVerifier) VerifyDriverLicense(ctx context.Context, _ strin
 	if n := len(req.PINFL); n > 0 && (req.PINFL[n-1]-'0')%2 == 1 {
 		categories = []string{"B"} // demo trigger: not qualified for trucks
 	}
-	if req.VehicleType != nil {
-		need := RequiredLicenseCategory(*req.VehicleType)
-		if !slices.Contains(categories, need) {
-			return LicenseResult{
-				Status:     models.VerificationRejected,
-				Categories: categories,
-				Reason:     ErrLicenseCategory.Error(),
-			}, nil
-		}
+
+	// The registry issues the licence number and the plate of the vehicle it
+	// is registered to; both are derived from the PINFL so they stay stable
+	// across demo runs (license.go).
+	res := LicenseResult{
+		Status:        models.VerificationApproved,
+		Categories:    categories,
+		LicenseNumber: GenerateLicenseNumber(req.PINFL),
+		VehiclePlate:  GenerateVehiclePlate(req.PINFL),
 	}
-	return LicenseResult{Status: models.VerificationApproved, Categories: categories}, nil
+
+	if need := req.requiredCategory(); need != "" && !slices.Contains(categories, need) {
+		res.Status = models.VerificationRejected
+		res.Reason = ErrLicenseCategory.Error()
+	}
+	return res, nil
 }
