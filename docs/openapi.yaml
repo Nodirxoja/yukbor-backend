@@ -1,0 +1,1091 @@
+openapi: 3.1.0
+
+# This spec describes VERIFIED behaviour, not intentions: every path, status
+# code and error code below is asserted by scripts/test-mobile-api.sh, which
+# runs against a live deployment. If the two ever disagree, the test is right.
+
+info:
+  title: YUK BOR API
+  version: "1.1"
+  description: |
+    Backend for the YUK BOR logistics platform — clients ordering transport,
+    special equipment and labour crews across Uzbekistan.
+
+    ## The shape of the thing
+
+    An **order** has one to three independent **legs** — `transport`,
+    `equipment`, `labor`. Each leg has its own executor, its own status and its
+    own escrow transaction. A combo order is therefore accepted by up to three
+    different people, tracked separately, and pays each of them independently.
+    The wire format flattens legs back into `assignedDriverId`,
+    `equipmentStatus`, and so on.
+
+    ## Registration
+
+    Every role registers the same way: phone OTP → MyID identity check →
+    `POST /auth/register`. Drivers and equipment providers additionally clear a
+    driving-licence check; failing it stores the applicant as `rejected` and
+    refuses registration.
+
+    ## Money
+
+    Amounts are whole UZS as **decimal strings** — never floats. A combo order's
+    price is split across its legs in proportion to the pricing formula, and the
+    parts always sum exactly to the total. The platform commission is computed
+    server-side only.
+
+    ## Before you build against this
+
+    Read `BACKEND_NOTES.md` for the additive fields, the deliberate deviations,
+    and the demo triggers. The most important operational facts:
+
+    - **No SMS gateway is wired yet.** `TEST_PHONES` currently accepts the code
+      `0000` for any number so the app can be built; that is a temporary
+      arrangement and will be removed.
+    - `POST /auth/login` takes only `phoneNumber`; the server checks that the
+      number completed an OTP within the last 15 minutes.
+    - The name you send to `/auth/register` is **overridden** by the official
+      name MyID returns. Display what the server gives back.
+
+servers:
+  - url: https://yukbor.duckdns.org
+    description: Production
+  - url: http://localhost:8080
+    description: Local docker compose
+
+tags:
+  - name: Auth
+    description: OTP, identity verification, registration, tokens
+  - name: Users
+    description: The signed-in user's profile
+  - name: Orders
+    description: Creating, browsing and driving orders
+  - name: Wallet
+    description: Escrow — money held per (order, payee) and released on completion
+  - name: Notifications
+    description: The durable feed behind the realtime channel
+  - name: Reviews
+    description: Post-completion ratings
+  - name: Admin
+    description: Back-office endpoints; require an `admin` role token
+  - name: Realtime
+    description: WebSocket channel
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Auth]
+      summary: Liveness
+      security: []
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: gateway }
+
+  /auth/otp/request:
+    post:
+      tags: [Auth]
+      summary: Send an SMS confirmation code
+      security: []
+      description: |
+        Rate limited per phone (configurable; currently disabled for testing).
+        `devCode` is returned **only** outside production — never rely on it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phoneNumber]
+              properties:
+                phoneNumber:
+                  type: string
+                  pattern: '^\+998\d{9}$'
+                  example: "+998901234567"
+      responses:
+        "200":
+          description: Code sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verificationId: { type: string, format: uuid }
+                  expiresInSeconds: { type: integer, example: 120 }
+                  devCode:
+                    type: string
+                    description: Non-production only; absent in production.
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "429":
+          description: Too many codes requested (`OTP_RATE_LIMITED`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/otp/verify:
+    post:
+      tags: [Auth]
+      summary: Confirm the code
+      security: []
+      description: |
+        Idempotent: verifying an already-confirmed `verificationId` returns 200
+        again rather than failing. Five wrong attempts kill the code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verificationId, code]
+              properties:
+                verificationId: { type: string, format: uuid }
+                code: { type: string, example: "1234" }
+      responses:
+        "200":
+          description: Confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified: { type: boolean, example: true }
+        "400":
+          description: "`OTP_INVALID`"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: "`OTP_EXPIRED` — request a new code"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/myid/verify:
+    post:
+      tags: [Auth]
+      summary: Verify identity through MyID
+      security: []
+      description: |
+        Multipart, because it carries a selfie. The backend proxies to the MyID
+        B2B API; the app never talks to MyID directly.
+
+        On success it issues a short-lived `myIdVerificationToken` (~10 min)
+        which `POST /auth/register` consumes **exactly once**. The token is
+        bound to the `verificationId`, so it cannot be used with a different
+        phone number.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [verificationId, passportSeries, passportNumber, pinfl, birthDate, selfie]
+              properties:
+                verificationId: { type: string, format: uuid, description: From the confirmed OTP }
+                passportSeries: { type: string, example: AB }
+                passportNumber: { type: string, example: "1234567" }
+                pinfl: { type: string, example: "12345678901234", description: 14 digits }
+                birthDate: { type: string, format: date, example: "2001-03-15" }
+                selfie: { type: string, format: binary }
+      responses:
+        "200":
+          description: Identity confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  myIdVerificationToken: { type: string, example: myid_tok_9f8a... }
+                  isMatched: { type: boolean }
+                  confidence: { type: number, format: float, example: 0.98 }
+                  verifiedFullName:
+                    type: string
+                    example: Karimov Aziz Baxtiyorovich
+                    description: The official name. Prefer it over what the user typed.
+        "403":
+          description: "`OTP_NOT_VERIFIED` — confirm the phone first"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404":
+          description: "`PASSPORT_NOT_FOUND`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "422":
+          description: "`FACE_MISMATCH` — no token is issued; ask for a new photo"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "503":
+          description: "`MYID_SERVICE_UNAVAILABLE` — offer a retry"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Create an account
+      security: []
+      description: |
+        Consumes the MyID token. On success `verificationStatus` is `approved`
+        immediately — there is no manual moderation step.
+
+        For `driver` and `equipmentProvider` a licence check also runs. Failing
+        it returns `LICENSE_CATEGORY_MISMATCH`; the applicant is still stored,
+        marked `rejected`, and may register again later.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fullName, phoneNumber, role, myIdVerificationToken]
+              properties:
+                fullName:
+                  type: string
+                  description: Overridden by the official MyID name when one is available.
+                phoneNumber: { type: string, example: "+998901234567" }
+                role: { $ref: "#/components/schemas/UserRole" }
+                myIdVerificationToken: { type: string }
+      responses:
+        "201":
+          description: Account created
+          content: { application/json: { schema: { $ref: "#/components/schemas/AuthSuccess" } } }
+        "401":
+          description: "`MYID_TOKEN_EXPIRED_OR_INVALID` — repeat identity verification"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403":
+          description: "`LICENSE_CATEGORY_MISMATCH` — the licence lacks the required category"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "409":
+          description: "`PHONE_ALREADY_REGISTERED`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Sign in
+      security: []
+      description: |
+        Send only the phone number. The server checks that this number completed
+        an OTP within the last **15 minutes** — so the normal flow is
+        `otp/request` → `otp/verify` → `login`, and a user who just registered
+        can sign in again without another SMS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phoneNumber]
+              properties:
+                phoneNumber: { type: string, example: "+998901234567" }
+      responses:
+        "200":
+          description: Signed in
+          content: { application/json: { schema: { $ref: "#/components/schemas/AuthSuccess" } } }
+        "401":
+          description: "`OTP_NOT_VERIFIED` — confirm the number first"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404":
+          description: "`USER_NOT_FOUND`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Exchange a refresh token
+      security: []
+      description: |
+        **Rotating**: the token you send is revoked as it is exchanged, so store
+        the new pair and never retry with the old one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties: { refreshToken: { type: string } }
+      responses:
+        "200":
+          description: New pair
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken: { type: string }
+                  refreshToken: { type: string }
+        "401":
+          description: Revoked, expired or already spent
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke a refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties: { refreshToken: { type: string } }
+      responses:
+        "204": { description: Revoked }
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: The signed-in user
+      responses:
+        "200":
+          description: Profile
+          content: { application/json: { schema: { $ref: "#/components/schemas/User" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [Users]
+      summary: Update name or email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fullName: { type: string }
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Updated profile
+          content: { application/json: { schema: { $ref: "#/components/schemas/User" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /orders:
+    get:
+      tags: [Orders]
+      summary: A client's orders
+      description: Defaults to the signed-in user. Reading another user's orders is refused.
+      parameters:
+        - { name: clientId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Orders
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Order" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Orders]
+      summary: Create an order
+      description: |
+        Legs are derived from `type` plus which requests are present. All legs
+        start `published`.
+
+        `priceEstimate` is honoured when sent, so the order shows the number the
+        user agreed to; the per-leg split always uses the server's own formula.
+        `paymentMethod` is optional and defaults to `payme`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderInput" }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /orders/estimate:
+    post:
+      tags: [Orders]
+      summary: Price an order before creating it
+      description: |
+        Applies the same formula the client uses — weight × tariff per ton +
+        equipment hours × rate + workers × hours × rate — floored at the minimum
+        order value, with tariffs read from the database so they can change
+        without an app release.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderInput" }
+      responses:
+        "200":
+          description: Price and the per-leg split
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  priceEstimate: { type: string, example: "3070000" }
+                  currency: { type: string, example: UZS }
+                  breakdown:
+                    type: object
+                    description: What each executor will be paid.
+                    additionalProperties: { type: string }
+                    example: { transport: "1000000", equipment: "1800000", labor: "270000" }
+
+  /orders/available:
+    get:
+      tags: [Orders]
+      summary: Open orders for an executor
+      description: Orders whose leg is still `published` and unclaimed.
+      parameters:
+        - name: leg
+          in: query
+          required: true
+          schema: { $ref: "#/components/schemas/Leg" }
+      responses:
+        "200":
+          description: Open orders
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Order" } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+
+  /orders/backhaul:
+    get:
+      tags: [Orders]
+      summary: Return loads near a drop-off point
+      description: |
+        Open transport legs whose pickup is within the radius of where a driver
+        is about to unload, nearest first, so they do not drive home empty.
+      parameters:
+        - { name: dropoffLat, in: query, required: true, schema: { type: number, format: double } }
+        - { name: dropoffLng, in: query, required: true, schema: { type: number, format: double } }
+        - { name: excludeOrderId, in: query, schema: { type: string, format: uuid } }
+        - { name: radiusKm, in: query, schema: { type: number, default: 15 } }
+      responses:
+        "200":
+          description: Nearby orders, nearest first
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Order" } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+
+  /orders/{id}:
+    get:
+      tags: [Orders]
+      summary: One order
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Order
+          content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } }
+        "404": { $ref: "#/components/responses/OrderNotFound" }
+
+  /orders/{id}/accept:
+    post:
+      tags: [Orders]
+      summary: Claim one leg
+      description: |
+        Atomic — two executors racing the same leg cannot both win; the loser
+        gets `LEG_ALREADY_TAKEN`.
+
+        On success escrow opens for that leg's share. A driver taking a
+        tractor-trailer load is re-checked for licence category `CE` here, even
+        though registration already proved `C`.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leg, executorId, executorName]
+              properties:
+                leg: { $ref: "#/components/schemas/Leg" }
+                executorId: { type: string, format: uuid }
+                executorName: { type: string }
+      responses:
+        "200":
+          description: Claimed
+          content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } }
+        "402":
+          description: "`PAYMENT_DECLINED` — the claim is rolled back, the leg stays open"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "403":
+          description: "`LICENSE_CATEGORY_MISMATCH` or claiming for somebody else"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404": { $ref: "#/components/responses/OrderNotFound" }
+        "409":
+          description: "`LEG_ALREADY_TAKEN` or `ORDER_NOT_PUBLISHED`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /orders/{id}/status:
+    patch:
+      tags: [Orders]
+      summary: Move a leg forward
+      description: |
+        Only the assigned executor may move their own leg. Forward-only:
+        skipping ahead is allowed (a short labour job may go straight from
+        `accepted` to `delivered`), going backwards never is.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leg, status]
+              properties:
+                leg: { $ref: "#/components/schemas/Leg" }
+                status: { $ref: "#/components/schemas/OrderStatus" }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } }
+        "403":
+          description: "`FORBIDDEN` — not your leg"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "409":
+          description: "`INVALID_STATUS_TRANSITION`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /orders/{id}/cancel:
+    post:
+      tags: [Orders]
+      summary: Cancel an order
+      description: |
+        Client only, and only while no leg has moved past `accepted`. Escrow
+        already held is refunded.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Cancelled
+          content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } }
+        "409":
+          description: "`ORDER_NOT_CANCELLABLE` — work has started"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /orders/{id}/confirm-completion:
+    post:
+      tags: [Orders]
+      summary: Confirm the work is done
+      description: |
+        Client only, allowed once every leg is `delivered` or `completed`. Marks
+        all legs `completed` and releases escrow **once per payee**. Idempotent
+        — confirming twice cannot pay anyone twice.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Completed
+          content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } }
+        "409":
+          description: "`ORDER_NOT_READY` — some leg is still in progress"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /wallet/transactions:
+    get:
+      tags: [Wallet]
+      summary: An executor's ledger
+      description: |
+        Defaults to the signed-in user; reading someone else's is refused.
+        Available balance is the sum of `released`; in escrow is the sum of
+        `held`.
+      parameters:
+        - { name: payeeId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Transactions
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Transaction" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Wallet]
+      summary: Open escrow
+      description: |
+        Normally called by the orders service when a leg is accepted, not by the
+        app. Idempotent on `(orderId, payeeId)` — a retry returns the existing
+        transaction rather than charging twice.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, orderTitle, payerId, payeeId, amount, paymentMethod]
+              properties:
+                orderId: { type: string, format: uuid }
+                orderTitle: { type: string }
+                payerId: { type: string, format: uuid }
+                payeeId: { type: string, format: uuid }
+                amount: { type: string, example: "1250000" }
+                paymentMethod: { $ref: "#/components/schemas/PaymentMethod" }
+      responses:
+        "200":
+          description: Already existed
+          content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } }
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } }
+        "402":
+          description: "`PAYMENT_DECLINED`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /wallet/transactions/release:
+    post:
+      tags: [Wallet]
+      summary: Release one executor's escrow
+      description: Idempotent — an already-released transaction returns 200 unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, payeeId]
+              properties:
+                orderId: { type: string, format: uuid }
+                payeeId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Released
+          content: { application/json: { schema: { $ref: "#/components/schemas/Transaction" } } }
+        "404":
+          description: "`TRANSACTION_NOT_FOUND`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: The user's notification feed
+      description: |
+        The durable record behind the WebSocket channel — anything pushed while
+        the app was closed is still here, so polling this is a complete
+        fallback.
+      parameters:
+        - { name: userId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Notifications, newest first
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Notification" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark one as read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Marked }
+        "404":
+          description: Not found, or not yours
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /reviews:
+    post:
+      tags: [Reviews]
+      summary: Review a counterparty
+      description: |
+        Only after every leg of the order is `completed`, and only once per
+        (order, reviewer, reviewee). The reviewee's aggregate rating is updated
+        immediately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, revieweeId, rating]
+              properties:
+                orderId: { type: string, format: uuid }
+                reviewerId:
+                  type: string
+                  format: uuid
+                  description: Defaults to the signed-in user.
+                revieweeId: { type: string, format: uuid }
+                rating: { type: integer, minimum: 1, maximum: 5 }
+                comment: { type: string }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/Review" } } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "409":
+          description: "`REVIEW_ALREADY_EXISTS` or `ORDER_NOT_COMPLETED`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /reviews/rating:
+    get:
+      tags: [Reviews]
+      summary: A user's aggregate rating
+      parameters:
+        - { name: userId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Aggregate
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rating: { type: number, format: float, example: 4.8 }
+                  count: { type: integer, example: 23 }
+
+  /ws:
+    get:
+      tags: [Realtime]
+      summary: Realtime channel (WebSocket)
+      security: []
+      description: |
+        `wss://…/ws?token=<accessToken>` — the **same** JWT used for REST. The
+        query parameter exists because browsers cannot set headers on a
+        WebSocket; an `Authorization` header also works.
+
+        One connection per user, scoped to the `sub` claim: you only receive
+        events for your own account. Each frame is
+        `{"event": "...", "data": { ... }}` where `data` is byte-identical to
+        the REST representation of that object, so the same models decode it.
+
+        Events: `order.created`, `order.updated`, `transaction.updated`,
+        `notification.created`.
+
+        Every event is also persisted as a notification, so a dropped socket
+        loses nothing — reconnect with backoff and poll meanwhile.
+      parameters:
+        - { name: token, in: query, required: true, schema: { type: string } }
+      responses:
+        "101": { description: Switching protocols }
+        "401": { description: Missing or invalid token }
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: All users, with licence detail
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/UserDetail" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /admin/orders:
+    get:
+      tags: [Admin]
+      summary: All orders
+      responses:
+        "200":
+          description: Orders
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Order" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /admin/transactions:
+    get:
+      tags: [Admin]
+      summary: The whole ledger
+      responses:
+        "200":
+          description: Transactions
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Transaction" } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /admin/stats:
+    get:
+      tags: [Admin]
+      summary: Platform totals
+      responses:
+        "200":
+          description: Aggregates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalOrders: { type: integer }
+                  activeOrders: { type: integer }
+                  completedOrders: { type: integer }
+                  registeredUsers: { type: integer }
+                  creditedToExecutors: { type: string, description: Σ released, net of commission }
+                  serviceFeesCharged: { type: string, description: Σ commission on released }
+                  heldInEscrow: { type: string }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /auth/admin/login:
+    post:
+      tags: [Admin]
+      summary: Back-office sign-in
+      security: []
+      description: |
+        Username and password, deliberately separate from the app's phone flow —
+        an operator is not a customer and may not hold the account's handset.
+        Returns the same token shape.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Signed in
+          content: { application/json: { schema: { $ref: "#/components/schemas/AuthSuccess" } } }
+        "401":
+          description: "`INVALID_CREDENTIALS` — the same message for a wrong user and a wrong password"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    OrderId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Unauthorized:
+      description: Missing, expired or invalid access token
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Forbidden:
+      description: Authenticated, but not allowed to touch this
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    ValidationError:
+      description: "`VALIDATION_ERROR` or `BAD_REQUEST`"
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    OrderNotFound:
+      description: "`ORDER_NOT_FOUND`"
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  schemas:
+    Error:
+      type: object
+      description: Every failure has this shape. Branch on `code`, show `message`.
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: OTP_INVALID }
+            message: { type: string, example: Неверный код подтверждения }
+
+    UserRole:
+      type: string
+      enum: [client, driver, equipmentProvider, laborProvider, fleetAdmin, admin]
+      description: |
+        `driver`, `equipmentProvider` and `laborProvider` are three different
+        kinds of executor — same registration flow, different role.
+
+    VerificationStatus:
+      type: string
+      enum: [pending, approved, rejected]
+
+    Leg:
+      type: string
+      enum: [transport, equipment, labor]
+
+    OrderType:
+      type: string
+      enum: [transportOnly, transportWithOptions, equipmentOnly, laborOnly]
+
+    OrderStatus:
+      type: string
+      enum:
+        [draft, published, matched, accepted, inProgress, loadingInProgress,
+         inTransit, delivered, completed, cancelled, disputed]
+      description: |
+        Shared by all three legs. The UI relabels
+        `loadingInProgress`/`inTransit`/`delivered` per order type; the API
+        always stores and returns the raw value.
+
+    VehicleType:
+      type: string
+      enum: [tractorTrailer, flatbed, refrigerated, tanker, dumpTruck, boxTruck]
+
+    EquipmentType:
+      type: string
+      enum: [excavator, crane, forklift, loader]
+
+    PaymentMethod:
+      type: string
+      enum: [payme, click, uzcard]
+
+    TransactionStatus:
+      type: string
+      enum: [held, released, refunded]
+
+    NotificationType:
+      type: string
+      enum: [newOrderMatch, orderStatusChanged, paymentReleased, backhaulSuggestion, reviewReceived]
+
+    Location:
+      type: object
+      properties:
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        role: { $ref: "#/components/schemas/UserRole" }
+        fullName: { type: string }
+        phoneNumber: { type: string }
+        email: { type: string, nullable: true }
+        isVerified: { type: boolean }
+        verificationStatus: { $ref: "#/components/schemas/VerificationStatus" }
+        rating: { type: number, format: float }
+        ratingsCount: { type: integer }
+
+    UserDetail:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          description: Admin projection. Passport and PINFL never leave the auth service.
+          properties:
+            createdAt: { type: string, format: date-time }
+            licenseNumber: { type: string, nullable: true, example: AB1234567 }
+            licenseCategories:
+              type: array
+              nullable: true
+              items: { type: string }
+              example: [B, C, CE]
+            vehiclePlate: { type: string, nullable: true, example: "01 123 ABC" }
+            rejectionReason: { type: string, nullable: true }
+
+    AuthSuccess:
+      type: object
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        accessToken: { type: string, description: Valid 24h. Also used for the WebSocket. }
+        refreshToken: { type: string, description: Valid 30 days, rotated on every use. }
+
+    CargoDetails:
+      type: object
+      properties:
+        cargoType: { type: string, example: Стройматериалы }
+        weightTons: { type: number, format: double }
+        requiresRefrigeration: { type: boolean }
+        requiredVehicleType: { $ref: "#/components/schemas/VehicleType" }
+        specialInstructions: { type: string, nullable: true }
+
+    EquipmentRequest:
+      type: object
+      properties:
+        equipmentType: { $ref: "#/components/schemas/EquipmentType" }
+        durationHours: { type: integer }
+        notes: { type: string, nullable: true }
+
+    LaborRequest:
+      type: object
+      properties:
+        workersCount: { type: integer }
+        durationHours: { type: integer }
+        taskDescription: { type: string, nullable: true }
+
+    OrderInput:
+      type: object
+      required: [type, pickupAddress, pickupLocation, dropoffAddress, dropoffLocation]
+      properties:
+        clientName: { type: string }
+        type: { $ref: "#/components/schemas/OrderType" }
+        cargo: { $ref: "#/components/schemas/CargoDetails" }
+        equipmentRequest: { $ref: "#/components/schemas/EquipmentRequest" }
+        laborRequest: { $ref: "#/components/schemas/LaborRequest" }
+        pickupAddress: { type: string }
+        pickupLocation: { $ref: "#/components/schemas/Location" }
+        dropoffAddress: { type: string }
+        dropoffLocation: { $ref: "#/components/schemas/Location" }
+        scheduledDate: { type: string, format: date-time }
+        priceEstimate: { type: string, description: Honoured when sent; the server prices it otherwise. }
+        currency: { type: string, default: UZS }
+        paymentMethod: { $ref: "#/components/schemas/PaymentMethod" }
+
+    Order:
+      type: object
+      description: |
+        Legs flattened into the assigned*/​*Status fields. A leg the order does
+        not have is `null`. For single-leg orders `status` mirrors that leg.
+      properties:
+        id: { type: string, format: uuid }
+        clientId: { type: string, format: uuid }
+        clientName: { type: string }
+        type: { $ref: "#/components/schemas/OrderType" }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        cargo: { $ref: "#/components/schemas/CargoDetails" }
+        equipmentRequest: { $ref: "#/components/schemas/EquipmentRequest" }
+        laborRequest: { $ref: "#/components/schemas/LaborRequest" }
+        pickupAddress: { type: string }
+        pickupLocation: { $ref: "#/components/schemas/Location" }
+        dropoffAddress: { type: string }
+        dropoffLocation: { $ref: "#/components/schemas/Location" }
+        scheduledDate: { type: string, format: date-time }
+        priceEstimate: { type: string, description: Whole UZS as a string — never a float. }
+        currency: { type: string }
+        assignedDriverId: { type: string, format: uuid, nullable: true }
+        assignedDriverName: { type: string, nullable: true }
+        assignedEquipmentProviderId: { type: string, format: uuid, nullable: true }
+        assignedEquipmentProviderName: { type: string, nullable: true }
+        equipmentStatus: { $ref: "#/components/schemas/OrderStatus" }
+        assignedLaborProviderId: { type: string, format: uuid, nullable: true }
+        assignedLaborProviderName: { type: string, nullable: true }
+        laborStatus: { $ref: "#/components/schemas/OrderStatus" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Transaction:
+      type: object
+      description: One per (orderId, payeeId). `payoutAmount = amount − platformCommission`.
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderTitle: { type: string }
+        payerId: { type: string, format: uuid }
+        payeeId: { type: string, format: uuid }
+        amount: { type: string }
+        platformCommission: { type: string }
+        paymentMethod: { $ref: "#/components/schemas/PaymentMethod" }
+        status: { $ref: "#/components/schemas/TransactionStatus" }
+        providerRef: { type: string, nullable: true, example: payme_txn_9f2c1a }
+        createdAt: { type: string, format: date-time }
+        releasedAt: { type: string, format: date-time, nullable: true }
+        refundedAt: { type: string, format: date-time, nullable: true }
+
+    Notification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        type: { $ref: "#/components/schemas/NotificationType" }
+        title: { type: string }
+        body: { type: string }
+        relatedOrderId: { type: string, format: uuid, nullable: true }
+        isRead: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    Review:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        reviewerId: { type: string, format: uuid }
+        revieweeId: { type: string, format: uuid }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        comment: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }

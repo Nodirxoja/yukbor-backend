@@ -20,7 +20,9 @@
 # Serving the dashboard: repeated in three places below, so it is a snippet.
 (spa) {
 	root * /srv/dashboard
-	try_files {path} /index.html
+	# {path}/index.html so /docs resolves to the API reference; /index.html
+	# last so every unknown path falls through to the SPA's own router.
+	try_files {path} {path}/index.html /index.html
 	file_server
 }
 

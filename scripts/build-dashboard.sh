@@ -50,4 +50,50 @@ if grep -rq 'Dilnoza Yusupova' dist/ 2>/dev/null; then
 fi
 echo "    clean — no mock records in dist/"
 
+echo "==> bundling the API reference"
+# Swagger UI is VENDORED, not loaded from a CDN: the reference has to work on
+# venue wifi, on a plane, and after the CDN this was pinned to changes its
+# paths. It is ~1MB of static files, which is a cheap price for that.
+mkdir -p dist/docs
+cp ../docs/openapi.yaml dist/openapi.yaml
+for f in swagger-ui.css swagger-ui-bundle.js swagger-ui-standalone-preset.js; do
+  cp "node_modules/swagger-ui-dist/$f" "dist/docs/$f"
+done
+cat > dist/docs/index.html <<'HTML'
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YUK BOR API</title>
+    <link rel="stylesheet" href="/docs/swagger-ui.css" />
+    <style>
+      body { margin: 0; background: #fafafa; }
+      .topbar { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="swagger"></div>
+    <script src="/docs/swagger-ui-bundle.js"></script>
+    <script src="/docs/swagger-ui-standalone-preset.js"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: '/openapi.yaml',
+        dom_id: '#swagger',
+        deepLinking: true,
+        // "Try it out" hits this same origin, so the examples are live rather
+        // than illustrative.
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+        layout: 'BaseLayout',
+        persistAuthorization: true,
+        defaultModelsExpandDepth: 1,
+        docExpansion: 'list',
+        tryItOutEnabled: true,
+      })
+    </script>
+  </body>
+</html>
+HTML
+echo "    /docs and /openapi.yaml bundled"
+
 du -sh dist | sed 's/^/    /'
