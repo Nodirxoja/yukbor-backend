@@ -20,6 +20,7 @@ import {
 } from '@radix-ui/themes'
 import { MagnifyingGlassIcon } from '@radix-ui/react-icons'
 import type { Order, User, UserRole, VerificationStatus } from '../api/types'
+import { CountUp } from '../hooks/useCountUp'
 
 type Group = 'all' | 'clients' | 'drivers' | 'equipment' | 'labor' | 'staff'
 
@@ -150,7 +151,7 @@ export function UsersSection({ users, orders }: { users: User[]; orders: Order[]
   return (
     <Flex direction="column" gap="4">
       {/* Who is on the platform, at a glance. */}
-      <Grid columns={{ initial: '2', sm: '3', lg: '6' }} gap="3">
+      <Grid columns={{ initial: '2', sm: '3', lg: '6' }} gap="3" className="stagger">
         <Tile label="Clients" value={counts.clients} hint="place orders" />
         <Tile label="Drivers" value={counts.drivers} hint="transport" />
         <Tile
@@ -241,8 +242,8 @@ function Tile({
         <Text size="1" color="gray">
           {label}
         </Text>
-        <Text size="6" weight="bold" color={accent}>
-          {value}
+        <Text size="6" weight="bold" color={accent} style={{ fontVariantNumeric: 'tabular-nums' }}>
+          <CountUp value={value} />
         </Text>
         <Text size="1" color="gray">
           {hint}

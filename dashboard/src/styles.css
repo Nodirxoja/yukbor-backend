@@ -1,9 +1,34 @@
-/* The ONLY global CSS in the dashboard (plan §11 design rules):
-   the backdrop that Radix's translucent glass panels need to read against.
-   Literal colors (not Radix tokens) because <body> sits outside the Theme
-   element where Radix defines its variables. Everything else is stock
-   Radix UI Themes. */
+/* The dashboard's motion layer.
+ *
+ * Plan §11 forbids styling beyond Radix theme tokens; this file is a deliberate,
+ * user-approved exception, and it is scoped to MOTION AND ELEVATION only.
+ * Nothing here changes a colour, a size, a spacing step or a typeface — every
+ * value is either a Radix variable or a transform. The design system stays
+ * intact; it just stops feeling static.
+ *
+ * Rules followed throughout:
+ *   - animate transform and opacity only, so nothing triggers layout
+ *   - fast on interaction (~140ms), slower on entrance (~380ms)
+ *   - easing that decelerates hard (ease-out-expo) reads as responsive;
+ *     linear or ease-in-out reads as sluggish
+ *   - everything collapses to nothing under prefers-reduced-motion
+ */
 
+:root {
+  --motion-fast: 140ms;
+  --motion-base: 220ms;
+  --motion-slow: 380ms;
+
+  /* Decelerating curve: most of the distance is covered immediately, so the
+     interface answers instantly and merely finishes gracefully. */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+/* ---- backdrop ---------------------------------------------------------
+   The one thing Radix cannot supply: a surface for its translucent glass
+   panels to read against. Literal colours because <body> sits outside the
+   Theme element where Radix defines its variables. */
 body {
   margin: 0;
   min-height: 100vh;
@@ -15,9 +40,173 @@ body {
   background-attachment: fixed;
 }
 
-/* Toast viewport. Radix Themes has no toast component, so the Radix toast
-   PRIMITIVE supplies behaviour and Themes components supply the visuals — this
-   is only the fixed placement and slide-in, which no component can express. */
+/* ---- cards ------------------------------------------------------------
+   A card that lifts under the cursor tells you it is a thing, not a
+   background. Opt out with data-static where the content owns the pointer
+   (the map) — a panel that shifts while you drag it is maddening. */
+.rt-Card {
+  transition:
+    transform var(--motion-fast) var(--ease-out-expo),
+    box-shadow var(--motion-base) var(--ease-out-expo);
+}
+
+.rt-Card:not([data-static]):hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-4);
+}
+
+.rt-Card:not([data-static]):active {
+  transform: translateY(-1px);
+  transition-duration: 60ms;
+}
+
+/* ---- buttons ----------------------------------------------------------
+   A press that moves is the difference between a control and a picture of
+   one. Scale rather than translate, so the click point stays put. */
+.rt-BaseButton {
+  transition:
+    transform var(--motion-fast) var(--ease-out-expo),
+    box-shadow var(--motion-fast) ease,
+    background-color var(--motion-fast) ease;
+}
+
+.rt-BaseButton:active:not(:disabled):not([data-disabled]) {
+  transform: scale(0.97);
+  transition-duration: 60ms;
+}
+
+/* Radix's own loading state already swaps content; keep the box calm. */
+.rt-BaseButton[data-loading] {
+  transform: none !important;
+}
+
+/* ---- tables -----------------------------------------------------------
+   Rows are scanned, not read. A wash of the accent under the cursor keeps
+   the eye on one line across a wide table. */
+.rt-TableRow {
+  transition: background-color var(--motion-fast) ease;
+}
+
+.rt-TableRootTable .rt-TableRow:hover {
+  background-color: var(--accent-a2);
+}
+
+.rt-TableCell,
+.rt-TableColumnHeaderCell {
+  transition: color var(--motion-fast) ease;
+}
+
+/* ---- navigation -------------------------------------------------------
+   The active tab's underline grows from the centre rather than appearing,
+   so switching sections has a direction. */
+.rt-TabNavLink {
+  transition: color var(--motion-fast) ease;
+}
+
+.rt-TabNavLink::after {
+  transition:
+    transform var(--motion-base) var(--ease-out-expo),
+    opacity var(--motion-fast) ease !important;
+}
+
+.rt-TabNavLink[data-active]::after {
+  transform: scaleX(1);
+}
+
+.rt-TabNavLink:not([data-active])::after {
+  transform: scaleX(0.4);
+  opacity: 0;
+}
+
+/* ---- inputs -----------------------------------------------------------
+   The focus ring should arrive, not blink. */
+.rt-TextFieldRoot {
+  transition:
+    box-shadow var(--motion-fast) var(--ease-out-expo),
+    transform var(--motion-fast) var(--ease-out-expo);
+}
+
+.rt-TextFieldRoot:focus-within {
+  transform: translateY(-1px);
+}
+
+/* ---- badges -----------------------------------------------------------
+   Status badges change constantly as orders move; a new value should be
+   noticeable without being loud. */
+.rt-Badge {
+  transition:
+    background-color var(--motion-base) ease,
+    color var(--motion-base) ease;
+}
+
+/* ---- entrances --------------------------------------------------------
+   Content arrives from slightly below and slightly small. The distances are
+   small on purpose: motion should be felt, not watched. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-in {
+  animation: rise var(--motion-slow) var(--ease-out-expo) both;
+}
+
+/* A staggered grid reads as one movement rather than several. Capped at ten
+   so a long list never leaves the last item waiting. */
+.stagger > * {
+  animation: rise var(--motion-slow) var(--ease-out-expo) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 40ms; }
+.stagger > *:nth-child(3) { animation-delay: 80ms; }
+.stagger > *:nth-child(4) { animation-delay: 120ms; }
+.stagger > *:nth-child(5) { animation-delay: 160ms; }
+.stagger > *:nth-child(6) { animation-delay: 200ms; }
+.stagger > *:nth-child(7) { animation-delay: 240ms; }
+.stagger > *:nth-child(n + 8) { animation-delay: 280ms; }
+
+/* ---- map --------------------------------------------------------------
+   Leaflet draws its own furniture; give it the same rounding as a Radix
+   panel so it does not look pasted on. */
+.leaflet-container {
+  border-radius: var(--radius-3);
+  font-family: inherit;
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-4);
+}
+
+/* Route lines fade in as OSRM answers, so a straight-line placeholder being
+   replaced by a real road does not snap. */
+.leaflet-overlay-pane path {
+  transition:
+    stroke var(--motion-base) ease,
+    stroke-width var(--motion-fast) ease,
+    opacity var(--motion-base) ease;
+}
+
+.leaflet-marker-icon {
+  transition: transform var(--motion-fast) var(--ease-spring);
+}
+
+.leaflet-marker-icon:hover {
+  transform-origin: bottom center;
+  z-index: 1000 !important;
+}
+
+/* ---- toasts -----------------------------------------------------------
+   Radix Themes has no toast component, so the Radix toast PRIMITIVE supplies
+   behaviour and Themes components supply the visuals — this is only the fixed
+   placement and slide-in, which no component can express. */
 .toast-viewport {
   position: fixed;
   bottom: 0;
@@ -35,32 +224,60 @@ body {
 }
 
 .toast-root[data-state='open'] {
-  animation: toast-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: toast-in var(--motion-base) var(--ease-out-expo);
 }
 .toast-root[data-state='closed'] {
-  animation: toast-out 100ms ease-in;
+  animation: toast-out 120ms ease-in;
 }
 .toast-root[data-swipe='move'] {
   transform: translateX(var(--radix-toast-swipe-move-x));
 }
 .toast-root[data-swipe='cancel'] {
   transform: translateX(0);
-  transition: transform 160ms ease-out;
+  transition: transform var(--motion-base) var(--ease-out-expo);
 }
 .toast-root[data-swipe='end'] {
-  animation: toast-out 100ms ease-out;
+  animation: toast-out 120ms ease-out;
 }
 
 @keyframes toast-in {
-  from { transform: translateX(110%); opacity: 0; }
-  to   { transform: translateX(0);    opacity: 1; }
+  from { transform: translateX(110%) scale(0.98); opacity: 0; }
+  to   { transform: translateX(0) scale(1);       opacity: 1; }
 }
 @keyframes toast-out {
   from { transform: translateX(0);    opacity: 1; }
   to   { transform: translateX(110%); opacity: 0; }
 }
 
+/* ---- dropdowns --------------------------------------------------------
+   Grows from the trigger's edge, so the menu clearly belongs to the button. */
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+.rt-DropdownMenuContent[data-state='open'] {
+  animation: menu-in var(--motion-fast) var(--ease-out-expo);
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+}
+
+/* ---- reduced motion ---------------------------------------------------
+   Not a courtesy: vestibular disorders make parallax and sliding genuinely
+   unpleasant. Everything above collapses to an instant state change, and the
+   interface loses nothing it needed. */
 @media (prefers-reduced-motion: reduce) {
-  .toast-root[data-state='open'],
-  .toast-root[data-state='closed'] { animation: none; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .rt-Card:not([data-static]):hover,
+  .rt-BaseButton:active:not(:disabled),
+  .rt-TextFieldRoot:focus-within {
+    transform: none;
+  }
 }

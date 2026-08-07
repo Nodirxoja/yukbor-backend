@@ -30,7 +30,7 @@ export function OverviewSection({
     <Flex direction="column" gap="4">
       {stats && <StatsCards stats={stats} />}
 
-      <Flex gap="2" wrap="wrap">
+      <Flex gap="2" wrap="wrap" className="animate-in">
         <Badge size="2" color="orange" variant="soft">
           {onTheRoad} on the road
         </Badge>
@@ -49,7 +49,7 @@ export function OverviewSection({
         )}
       </Flex>
 
-      <Card>
+      <Card data-static>
         <Flex direction="column" gap="2">
           <Flex justify="between" align="baseline">
             <Heading size="3">Live map</Heading>
@@ -63,7 +63,7 @@ export function OverviewSection({
         </Flex>
       </Card>
 
-      <Grid columns={{ initial: '1', md: '2' }} gap="4">
+      <Grid columns={{ initial: '1', md: '2' }} gap="4" className="stagger">
         <RecentOrders orders={orders} onSelect={onSelect} />
         <RecentUsers users={users} />
       </Grid>

@@ -6,6 +6,7 @@ import { Box, Card, Flex, Grid, SegmentedControl, Text, TextField } from '@radix
 import { MagnifyingGlassIcon } from '@radix-ui/react-icons'
 import type { Order, OrderStatus } from '../api/types'
 import { OrdersTable } from '../components/OrdersTable'
+import { CountUp } from '../hooks/useCountUp'
 
 type Filter = 'all' | 'open' | 'running' | 'completed' | 'cancelled'
 
@@ -84,7 +85,7 @@ export function OrdersSection({
 
   return (
     <Flex direction="column" gap="4">
-      <Grid columns={{ initial: '2', sm: '4' }} gap="3">
+      <Grid columns={{ initial: '2', sm: '4' }} gap="3" className="stagger">
         <Stat label="Total orders" value={String(counts.all)} />
         <Stat label="Awaiting an executor" value={String(counts.open)} accent="blue" />
         <Stat label="In progress" value={String(counts.running)} accent="orange" />
@@ -153,8 +154,8 @@ function Stat({
         <Text size="1" color="gray">
           {label}
         </Text>
-        <Text size="6" weight="bold" color={accent}>
-          {value}
+        <Text size="6" weight="bold" color={accent} style={{ fontVariantNumeric: 'tabular-nums' }}>
+          <CountUp value={Number(value)} />
         </Text>
         {hint && (
           <Text size="1" color="gray">

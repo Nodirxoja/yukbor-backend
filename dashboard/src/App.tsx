@@ -212,6 +212,8 @@ function Dashboard({ session, onSignedOut }: { session: Session | null; onSigned
       </Box>
 
       <Container size="4" px="4" py="4">
+        {/* key by tab so React remounts and the entrance animation replays */}
+        <div key={tab} className="animate-in">
         {tab === 'overview' && (
           <OverviewSection
             stats={stats}
@@ -229,6 +231,7 @@ function Dashboard({ session, onSignedOut }: { session: Session | null; onSigned
           />
         )}
         {tab === 'users' && <UsersSection users={users} orders={orders} />}
+        </div>
       </Container>
     </Box>
   )
