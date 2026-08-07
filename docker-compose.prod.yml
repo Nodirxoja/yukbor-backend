@@ -126,14 +126,11 @@ services:
       SITE_ADDRESS: ${SITE_ADDRESS}
       ACME_EMAIL: ${ACME_EMAIL:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
-      DASH_USER: ${DASH_USER:-admin}
-    # DASH_PASSWORD_HASH lives here rather than in .env because a bcrypt hash
-    # contains '$' characters: Compose would interpolate them and bash would
-    # fail to source them. env_file passes values through verbatim.
-    env_file:
-      - caddy.env
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Basic-auth credentials as Caddy config, not as env: a bcrypt hash's
+      # '$' characters are interpolated by Compose in .env AND env_file.
+      - ./caddy-auth.conf:/etc/caddy/auth.conf:ro
       - ./dashboard/dist:/srv/dashboard:ro
       - caddy_data:/data
       - caddy_config:/config

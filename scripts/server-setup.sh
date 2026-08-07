@@ -59,11 +59,16 @@ ADMIN_TOKEN=
 EOF
   chmod 600 .env
 
-  # A bcrypt hash starts '\$2a\$14\$...'. Compose's env_file passes values
-  # through literally with no interpolation, and nothing sources this file,
-  # so the dollars survive intact.
-  printf 'DASH_PASSWORD_HASH=%s\n' "$DASH_PASSWORD_HASH" > caddy.env
-  chmod 600 caddy.env
+  # A bcrypt hash contains literal '$' ($2a$14$...), which Compose interpolates
+  # in BOTH .env and env_file, and which bash expands when sourcing. So it never
+  # travels as an environment variable: it goes straight into a Caddy config
+  # snippet, which Caddy parses itself with no interpolation layer in between.
+  cat > caddy-auth.conf <<AUTH
+basic_auth {
+	$DASH_USER $DASH_PASSWORD_HASH
+}
+AUTH
+  chmod 600 caddy-auth.conf
 
   cat > .dashboard-credentials <<EOF
 Dashboard login for https://$SITE/

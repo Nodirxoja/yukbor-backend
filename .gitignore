@@ -6,7 +6,7 @@
 .env
 .dashboard-credentials
 .seed-tokens
-caddy.env
+caddy-auth.conf
 
 # Node (dashboard)
 node_modules/
