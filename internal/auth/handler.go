@@ -137,7 +137,11 @@ func (h *Handler) otpVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.store.VerifyOTP(r.Context(), req.VerificationID, req.Code, !h.cfg.IsProd())
+	err := h.store.VerifyOTP(r.Context(), req.VerificationID, req.Code, OTPPolicy{
+		AllowMaster: !h.cfg.IsProd(),
+		TestPhones:  h.cfg.TestPhoneSet(),
+		TestCode:    h.cfg.TestOTPCode,
+	})
 	switch {
 	case errors.Is(err, ErrOTPExpired):
 		httpx.WriteError(w, http.StatusGone, httpx.CodeOTPExpired, "код истёк, запросите новый")

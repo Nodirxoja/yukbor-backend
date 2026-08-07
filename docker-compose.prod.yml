@@ -17,6 +17,11 @@ x-service-env: &service-env
   # prod removes the OTP devCode from responses, disables the 7777 master
   # code, and makes verificationId mandatory on login.
   APP_ENV: ${APP_ENV:-prod}
+  # Numbers that accept TEST_OTP_CODE instead of a real SMS, so the mobile app
+  # can be built against production before an SMS gateway exists. An allowlist,
+  # not a mode: it never weakens login for any other number.
+  TEST_PHONES: ${TEST_PHONES:-}
+  TEST_OTP_CODE: ${TEST_OTP_CODE:-0000}
   AUTH_URL: http://auth:8081
   ORDERS_URL: http://orders:8082
   WALLET_URL: http://wallet:8083

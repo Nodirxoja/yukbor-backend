@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -101,19 +102,46 @@ func (s *Store) CreateOTP(ctx context.Context, phone string) (verificationID, co
 	return verificationID, code, err
 }
 
+// OTPPolicy is what a submitted code is allowed to be, besides the real one.
+type OTPPolicy struct {
+	// AllowMaster enables the non-prod escape hatch 7777 (plan §10).
+	AllowMaster bool
+	// TestPhones accept TestCode instead of the SMS code. Scoped per number,
+	// so this can be left on in production without weakening a real user's
+	// login — it is an allowlist, not a mode.
+	TestPhones map[string]bool
+	TestCode   string
+}
+
+// accepts reports whether a submitted code is valid for a phone under this
+// policy, given the stored hash.
+func (p OTPPolicy) accepts(phone, code, hash string) (ok bool, viaTestNumber bool) {
+	if hash == HashOTP(code) {
+		return true, false
+	}
+	if p.AllowMaster && code == OTPMasterCode {
+		return true, false
+	}
+	if p.TestCode != "" && p.TestPhones[phone] && code == p.TestCode {
+		return true, true
+	}
+	return false, false
+}
+
 // VerifyOTP checks a submitted code and marks the verification usable by the
-// MyID step. allowMaster enables the non-prod escape hatch (plan §10).
-func (s *Store) VerifyOTP(ctx context.Context, verificationID, code string, allowMaster bool) error {
+// MyID step.
+func (s *Store) VerifyOTP(ctx context.Context, verificationID, code string, policy OTPPolicy) error {
 	var (
+		phone    string
 		hash     string
 		attempts int
 		expires  time.Time
 		verified bool
 	)
 	err := s.pool.QueryRow(ctx, `
-		SELECT code_hash, attempts, expires_at, verified
+		SELECT phone_number, code_hash, attempts, expires_at, verified
 		FROM auth.otp_codes WHERE verification_id = $1`, verificationID,
-	).Scan(&hash, &attempts, &expires, &verified)
+	).Scan(&phone, &hash, &attempts, &expires, &verified)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrOTPInvalid
 	}
@@ -131,12 +159,16 @@ func (s *Store) VerifyOTP(ctx context.Context, verificationID, code string, allo
 		return ErrOTPInvalid
 	}
 
-	ok := hash == HashOTP(code) || (allowMaster && code == OTPMasterCode)
+	ok, viaTestNumber := policy.accepts(phone, code, hash)
 	if !ok {
 		_, _ = s.pool.Exec(ctx,
 			`UPDATE auth.otp_codes SET attempts = attempts + 1 WHERE verification_id = $1`,
 			verificationID)
 		return ErrOTPInvalid
+	}
+	if viaTestNumber {
+		// Always auditable: a fixed-code login should never be silent.
+		slog.Warn("OTP accepted via TEST NUMBER allowlist", "phone", phone)
 	}
 
 	_, err = s.pool.Exec(ctx,
