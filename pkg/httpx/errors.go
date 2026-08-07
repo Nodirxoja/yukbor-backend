@@ -11,6 +11,7 @@ const (
 	CodeOTPNotVerified         = "OTP_NOT_VERIFIED"
 	CodePhoneAlreadyRegistered = "PHONE_ALREADY_REGISTERED"
 	CodeUserNotFound           = "USER_NOT_FOUND"
+	CodeInvalidCredentials     = "INVALID_CREDENTIALS" // dashboard username/password
 
 	// MyID KYC (contract §1, v1.1)
 	CodePassportNotFound = "PASSPORT_NOT_FOUND"

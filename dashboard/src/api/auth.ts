@@ -55,27 +55,17 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export interface OtpChallenge {
-  verificationId: string
-  expiresInSeconds: number
-  /** Present outside production only — lets local dev skip reading an SMS. */
-  devCode?: string
-}
-
-export function requestOtp(phoneNumber: string): Promise<OtpChallenge> {
-  return post<OtpChallenge>('/auth/otp/request', { phoneNumber })
-}
-
-export function verifyOtp(verificationId: string, code: string): Promise<{ verified: boolean }> {
-  return post('/auth/otp/verify', { verificationId, code })
-}
-
 /**
- * Exchanges a confirmed phone for tokens. The contract sends only phoneNumber;
- * the server checks that this number completed an OTP recently.
+ * Signs the back office in with a username and password.
+ *
+ * Deliberately not the phone/SMS flow the mobile app uses: an operator is not a
+ * customer, may not hold the account's handset, and should not wait on an SMS
+ * to open a dashboard. The server returns the same kind of token either way, so
+ * everything downstream is identical — only the way you prove who you are
+ * differs.
  */
-export function login(phoneNumber: string): Promise<Session> {
-  return post<Session>('/auth/login', { phoneNumber })
+export function adminLogin(username: string, password: string): Promise<Session> {
+  return post<Session>('/auth/admin/login', { username, password })
 }
 
 export function logout(session: Session | null): void {
@@ -102,20 +92,5 @@ export function saveSession(session: Session): void {
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
 }
 
-/** Formats +998901234567 as +998 90 123 45 67 for display. */
-export function formatPhone(phone: string): string {
-  const d = phone.replace(/\D/g, '')
-  if (d.length !== 12) return phone
-  return `+${d.slice(0, 3)} ${d.slice(3, 5)} ${d.slice(5, 8)} ${d.slice(8, 10)} ${d.slice(10)}`
-}
-
-/** Normalises whatever the user typed into the +998XXXXXXXXX the API wants. */
-export function normalisePhone(input: string): string {
-  const digits = input.replace(/\D/g, '')
-  const national = digits.startsWith('998') ? digits.slice(3) : digits
-  return `+998${national}`.slice(0, 13)
-}
-
-export function isValidPhone(input: string): boolean {
-  return /^\+998\d{9}$/.test(normalisePhone(input))
-}
+// Phone formatting/validation helpers lived here while the dashboard used the
+// SMS flow. They are gone with it — the mobile app owns that flow now.

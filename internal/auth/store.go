@@ -78,18 +78,22 @@ func scanUser(row pgx.Row) (*UserRecord, error) {
 
 // CreateOTP rate-limits by phone, then stores a hashed code and returns the
 // verification id together with the plaintext code (for the SMS sender only).
-func (s *Store) CreateOTP(ctx context.Context, phone string) (verificationID, code string, err error) {
-	var recent int
-	err = s.pool.QueryRow(ctx, `
-		SELECT count(*) FROM auth.otp_codes
-		WHERE phone_number = $1 AND created_at > now() - $2::interval`,
-		phone, fmt.Sprintf("%d seconds", int(OTPWindow.Seconds())),
-	).Scan(&recent)
-	if err != nil {
-		return "", "", err
-	}
-	if recent >= OTPWindowMax {
-		return "", "", ErrOTPRateLimited
+// A limit of 0 disables rate limiting, which is what you want while walking a
+// flow by hand — three attempts is nothing when you are retrying a form.
+func (s *Store) CreateOTP(ctx context.Context, phone string, limit int) (verificationID, code string, err error) {
+	if limit > 0 {
+		var recent int
+		err = s.pool.QueryRow(ctx, `
+			SELECT count(*) FROM auth.otp_codes
+			WHERE phone_number = $1 AND created_at > now() - $2::interval`,
+			phone, fmt.Sprintf("%d seconds", int(OTPWindow.Seconds())),
+		).Scan(&recent)
+		if err != nil {
+			return "", "", err
+		}
+		if recent >= limit {
+			return "", "", ErrOTPRateLimited
+		}
 	}
 
 	code = GenerateOTP()
@@ -106,11 +110,13 @@ func (s *Store) CreateOTP(ctx context.Context, phone string) (verificationID, co
 type OTPPolicy struct {
 	// AllowMaster enables the non-prod escape hatch 7777 (plan §10).
 	AllowMaster bool
-	// TestPhones accept TestCode instead of the SMS code. Scoped per number,
-	// so this can be left on in production without weakening a real user's
-	// login — it is an allowlist, not a mode.
+	// TestPhones accept TestCode instead of the SMS code.
 	TestPhones map[string]bool
-	TestCode   string
+	// TestAllPhones makes TestCode valid for EVERY number (TEST_PHONES="*").
+	// This removes phone verification entirely — it is for demonstrating the
+	// product before an SMS gateway exists, and must be off for real users.
+	TestAllPhones bool
+	TestCode      string
 }
 
 // accepts reports whether a submitted code is valid for a phone under this
@@ -122,7 +128,7 @@ func (p OTPPolicy) accepts(phone, code, hash string) (ok bool, viaTestNumber boo
 	if p.AllowMaster && code == OTPMasterCode {
 		return true, false
 	}
-	if p.TestCode != "" && p.TestPhones[phone] && code == p.TestCode {
+	if p.TestCode != "" && code == p.TestCode && (p.TestAllPhones || p.TestPhones[phone]) {
 		return true, true
 	}
 	return false, false
@@ -403,6 +409,32 @@ func (s *Store) ListUsers(ctx context.Context, role string) ([]UserRecord, error
 		out = append(out, *u)
 	}
 	return out, rows.Err()
+}
+
+// AdminAccount returns the user record the dashboard session is issued for,
+// creating one if the database has no administrator yet.
+//
+// The dashboard authenticates with a username and password, but the rest of the
+// system only understands user ids and roles — every /admin endpoint checks the
+// role claim in a JWT. So a dashboard sign-in still resolves to a real user row,
+// and authorisation stays in one mechanism rather than two.
+func (s *Store) AdminAccount(ctx context.Context, phone, fullName string) (*UserRecord, error) {
+	existing, err := scanUser(s.pool.QueryRow(ctx,
+		`SELECT `+userColumns+` FROM auth.users WHERE role = 'admin' ORDER BY created_at LIMIT 1`))
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, db.ErrNotFound) {
+		return nil, err
+	}
+
+	// Fresh database: give the operator an account so the back office is
+	// reachable without having to seed first.
+	return scanUser(s.pool.QueryRow(ctx, `
+		INSERT INTO auth.users (role, full_name, phone_number, is_verified, verification_status)
+		VALUES ('admin', $1, $2, TRUE, 'approved')
+		ON CONFLICT (phone_number) DO UPDATE SET role = 'admin'
+		RETURNING `+userColumns, fullName, phone))
 }
 
 // CountUsers backs the dashboard's "registered users" tile via the wallet's

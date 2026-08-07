@@ -26,6 +26,12 @@ const (
 	AccessTokenTTL  = 24 * time.Hour
 	RefreshTokenTTL = 30 * 24 * time.Hour
 	maxSelfieBytes  = 10 << 20 // 10 MiB
+
+	// Identity of the account a username/password dashboard sign-in maps to,
+	// used only when the database has no administrator yet. The phone is in the
+	// reserved +998 90 000 00xx block and never receives SMS.
+	AdminAccountPhone = "+998900000000"
+	AdminAccountName  = "Administrator"
 )
 
 type Handler struct {
@@ -37,6 +43,16 @@ type Handler struct {
 }
 
 func NewHandler(cfg config.Config, pool *pgxpool.Pool) *Handler {
+	// Said on every start rather than once at setup: a system where a fixed
+	// code signs in as anybody should be impossible to run without noticing.
+	if cfg.TestPhonesAreUniversal() {
+		slog.Warn("PHONE VERIFICATION IS DISABLED — TEST_PHONES=* accepts the fixed "+
+			"code for ANY number. Wire an SMS sender and clear TEST_PHONES before real users.",
+			"testCode", cfg.TestOTPCode)
+	}
+	if cfg.OTPRateLimit <= 0 {
+		slog.Warn("OTP rate limiting is OFF — a phone may request unlimited codes")
+	}
 	return &Handler{
 		cfg:     cfg,
 		store:   NewStore(pool),
@@ -58,6 +74,10 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /auth/myid/verify", h.myidVerify)
 	mux.HandleFunc("POST /auth/register", h.register)
 	mux.HandleFunc("POST /auth/login", h.login)
+	// Back-office sign-in. Separate from the phone flow on purpose: operators
+	// are not customers, may not have the account's handset, and should not
+	// wait on an SMS to open a dashboard.
+	mux.HandleFunc("POST /auth/admin/login", h.adminLogin)
 	mux.HandleFunc("POST /auth/refresh", h.refresh)
 	mux.HandleFunc("POST /auth/logout", h.logout)
 
@@ -98,7 +118,7 @@ func (h *Handler) otpRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	verificationID, code, err := h.store.CreateOTP(r.Context(), req.PhoneNumber)
+	verificationID, code, err := h.store.CreateOTP(r.Context(), req.PhoneNumber, h.cfg.OTPRateLimit)
 	if errors.Is(err, ErrOTPRateLimited) {
 		httpx.WriteError(w, http.StatusTooManyRequests, httpx.CodeOTPRateLimited,
 			"too many codes requested, try again later")
@@ -138,9 +158,10 @@ func (h *Handler) otpVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := h.store.VerifyOTP(r.Context(), req.VerificationID, req.Code, OTPPolicy{
-		AllowMaster: !h.cfg.IsProd(),
-		TestPhones:  h.cfg.TestPhoneSet(),
-		TestCode:    h.cfg.TestOTPCode,
+		AllowMaster:   !h.cfg.IsProd(),
+		TestPhones:    h.cfg.TestPhoneSet(),
+		TestAllPhones: h.cfg.TestPhonesAreUniversal(),
+		TestCode:      h.cfg.TestOTPCode,
 	})
 	switch {
 	case errors.Is(err, ErrOTPExpired):
@@ -388,6 +409,39 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.fail(w, "lookup user", err)
+		return
+	}
+	h.issueTokens(w, r.Context(), user, http.StatusOK)
+}
+
+// adminLogin signs the back office in with a username and password.
+//
+// It issues the same kind of token the phone flow does, for a real admin user
+// row, so authorisation downstream stays a single mechanism: every /admin
+// endpoint checks the role claim and neither knows nor cares how the token was
+// obtained.
+func (h *Handler) adminLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := httpx.ReadJSONLoose(r, &req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, httpx.CodeBadRequest, "invalid body")
+		return
+	}
+
+	if !h.cfg.AdminPasswordMatches(req.Username, req.Password) {
+		// One message for both wrong username and wrong password: saying which
+		// was wrong tells an attacker when they have found a real account.
+		slog.Warn("failed dashboard sign-in", "username", req.Username, "ip", r.RemoteAddr)
+		httpx.WriteError(w, http.StatusUnauthorized, httpx.CodeInvalidCredentials,
+			"Неверный логин или пароль")
+		return
+	}
+
+	user, err := h.store.AdminAccount(r.Context(), AdminAccountPhone, AdminAccountName)
+	if err != nil {
+		h.fail(w, "resolve admin account", err)
 		return
 	}
 	h.issueTokens(w, r.Context(), user, http.StatusOK)

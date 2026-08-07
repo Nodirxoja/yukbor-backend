@@ -43,6 +43,15 @@ func TestOTPPolicyAccepts(t *testing.T) {
 		{"empty test code opens nothing",
 			OTPPolicy{TestPhones: map[string]bool{"+998900000001": true}},
 			"+998900000001", "", false, false},
+
+		// TEST_PHONES="*" — the fixed code opens every number. This is phone
+		// verification switched off, so the tests state exactly that.
+		{"wildcard opens any number",
+			OTPPolicy{TestAllPhones: true, TestCode: "0000"}, "+998913334455", "0000", true, true},
+		{"wildcard still rejects a wrong code",
+			OTPPolicy{TestAllPhones: true, TestCode: "0000"}, "+998913334455", "1234", false, false},
+		{"wildcard with no code set opens nothing",
+			OTPPolicy{TestAllPhones: true}, "+998913334455", "", false, false},
 	}
 
 	for _, c := range cases {

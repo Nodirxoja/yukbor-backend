@@ -22,6 +22,12 @@ x-service-env: &service-env
   # not a mode: it never weakens login for any other number.
   TEST_PHONES: ${TEST_PHONES:-}
   TEST_OTP_CODE: ${TEST_OTP_CODE:-0000}
+  # 0 disables OTP rate limiting. Useful while walking a flow by hand; a real
+  # deployment wants the limit back so a phone cannot be used to send SMS spam.
+  OTP_RATE_LIMIT: ${OTP_RATE_LIMIT:-3}
+  # Dashboard sign-in (username/password, separate from the app's phone flow).
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
   AUTH_URL: http://auth:8081
   ORDERS_URL: http://orders:8082
   WALLET_URL: http://wallet:8083
