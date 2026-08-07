@@ -1,0 +1,20 @@
+# Build output
+/bin/
+*.exe
+
+# Environment
+.env
+
+# Node (dashboard)
+node_modules/
+dashboard/dist/
+dashboard/.vite/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Go test artifacts
+*.test
+*.out

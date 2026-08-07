@@ -1,0 +1,97 @@
+x-common-env: &common-env
+  DATABASE_URL: postgres://yukbor:yukbor@postgres:5432/yukbor?sslmode=disable
+  JWT_SECRET: dev-secret-change-me
+  INTERNAL_TOKEN: dev-internal-token
+  APP_ENV: dev # enables the OTP master code and simulated upstreams (plan §10)
+  AUTH_URL: http://auth:8081
+  ORDERS_URL: http://orders:8082
+  WALLET_URL: http://wallet:8083
+  NOTIFICATIONS_URL: http://notifications:8084
+  REVIEWS_URL: http://reviews:8085
+
+x-service: &service
+  build: { context: ., args: { SERVICE: placeholder } }
+  environment: *common-env
+  restart: unless-stopped
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: yukbor
+      POSTGRES_PASSWORD: yukbor
+      POSTGRES_DB: yukbor
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yukbor"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: applies migrations/*.sql exactly once each, tracked in
+  # public.schema_migrations. Every service waits for it to exit 0, so a schema
+  # change never needs `docker compose down -v`.
+  migrate:
+    build: { context: ., args: { SERVICE: migrate } }
+    environment: *common-env
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  auth:
+    <<: *service
+    build: { context: ., args: { SERVICE: auth } }
+    healthcheck: &health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:$${PORT:-8081}/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  orders:
+    <<: *service
+    build: { context: ., args: { SERVICE: orders } }
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/health || exit 1"]
+
+  wallet:
+    <<: *service
+    build: { context: ., args: { SERVICE: wallet } }
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/health || exit 1"]
+
+  notifications:
+    <<: *service
+    build: { context: ., args: { SERVICE: notifications } }
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/health || exit 1"]
+
+  reviews:
+    <<: *service
+    build: { context: ., args: { SERVICE: reviews } }
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8085/health || exit 1"]
+
+  # The single base URL iOS and the dashboard talk to.
+  gateway:
+    build: { context: ., args: { SERVICE: gateway } }
+    environment: *common-env
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    depends_on:
+      auth: { condition: service_healthy }
+      orders: { condition: service_healthy }
+      wallet: { condition: service_healthy }
+      notifications: { condition: service_healthy }
+      reviews: { condition: service_healthy }
+
+volumes:
+  pgdata:

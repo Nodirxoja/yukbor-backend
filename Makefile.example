@@ -1,0 +1,26 @@
+.PHONY: build test up down logs migrate run-%
+
+build: ## compile everything
+	go build ./...
+
+test:
+	go test ./...
+
+up: ## start postgres + all services
+	docker compose up --build -d
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f
+
+# Apply migrations manually (compose applies them on first postgres start)
+migrate:
+	for f in migrations/*.sql; do \
+		docker compose exec -T postgres psql -U yukbor -d yukbor -f /docker-entrypoint-initdb.d/$$(basename $$f); \
+	done
+
+# Run one service locally against dockerized postgres: make run-auth
+run-%:
+	go run ./cmd/$*
