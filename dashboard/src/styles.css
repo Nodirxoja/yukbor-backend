@@ -281,3 +281,168 @@ body {
     transform: none;
   }
 }
+
+/* ---- application shell ------------------------------------------------
+   A rail plus a topbar, both fixed, so navigation never scrolls away and the
+   content area is the only thing that moves. */
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  flex-shrink: 0;
+  border-right: 1px solid var(--gray-a5);
+  background: var(--color-panel-translucent);
+  backdrop-filter: blur(12px);
+  transition: width var(--motion-base) var(--ease-out-expo);
+  overflow: hidden;
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  height: 48px;
+  border-bottom: 1px solid var(--gray-a5);
+  background: var(--color-panel-translucent);
+  backdrop-filter: blur(12px);
+}
+
+/* ---- sidebar navigation -----------------------------------------------
+   The active marker is its own element so it can SLIDE between items. A
+   background that merely repaints gives the eye nothing to follow; a bar that
+   travels tells you where you came from. */
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-2);
+  color: var(--gray-11);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    transform var(--motion-fast) var(--ease-out-expo);
+}
+
+.nav-item:hover {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+
+.nav-item:active {
+  transform: scale(0.98);
+}
+
+.nav-item.active {
+  background: var(--accent-a3);
+  color: var(--accent-11);
+}
+
+.nav-item-marker {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent-9);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition:
+    height var(--motion-base) var(--ease-spring),
+    opacity var(--motion-fast) ease;
+}
+
+.nav-item-marker[data-active] {
+  height: 60%;
+  opacity: 1;
+}
+
+/* ---- pages ------------------------------------------------------------
+   Content arrives from slightly right, which reads as "forward" in a
+   left-to-right interface. Shorter than a card entrance: navigation should
+   feel immediate, not cinematic. */
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.page-enter {
+  animation: page-in 240ms var(--ease-out-expo) both;
+}
+
+/* ---- density ----------------------------------------------------------
+   Metric tiles are deliberately thin: an operations screen should fit the
+   operation on it, not spend a third of the viewport on seven numbers. */
+.metric {
+  transition:
+    transform var(--motion-fast) var(--ease-out-expo),
+    box-shadow var(--motion-base) var(--ease-out-expo);
+}
+
+.metric:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-3);
+}
+
+/* Rows that lead somewhere say so before they are clicked. */
+.row-link {
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) ease,
+    transform var(--motion-fast) var(--ease-out-expo);
+}
+
+.row-link:hover {
+  background: var(--accent-a2);
+}
+
+.row-link:active {
+  transform: scale(0.995);
+}
+
+.inline-link {
+  color: var(--accent-11);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--motion-fast) ease;
+}
+
+.inline-link:hover {
+  border-bottom-color: var(--accent-a7);
+}
+
+/* The refresh control spins only while a request is in flight, so the icon
+   reports state rather than decorating. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .nav-item-marker,
+  .spin {
+    animation: none !important;
+    transition: none !important;
+  }
+  .metric:hover,
+  .row-link:active,
+  .nav-item:active {
+    transform: none;
+  }
+}

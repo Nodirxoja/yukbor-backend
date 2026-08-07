@@ -84,6 +84,10 @@ func (h *Handler) Routes() http.Handler {
 	// Dashboard (plan §11)
 	mux.HandleFunc("GET /admin/stats",
 		httpx.AuthedRole(secret, []string{string(models.RoleAdmin)}, h.adminStats))
+	// The ledger itself, not just its totals: a back office needs to answer
+	// "who was paid what, for which order, and has it cleared".
+	mux.HandleFunc("GET /admin/transactions",
+		httpx.AuthedRole(secret, []string{string(models.RoleAdmin)}, h.adminTransactions))
 
 	// Internal: cancellation returns held money to the payer.
 	mux.HandleFunc("POST /internal/transactions/refund",
@@ -270,6 +274,15 @@ func (h *Handler) adminStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, stats)
+}
+
+func (h *Handler) adminTransactions(w http.ResponseWriter, r *http.Request) {
+	txs, err := h.store.ListAll(r.Context())
+	if err != nil {
+		h.fail(w, "list all transactions", err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, txs)
 }
 
 func (h *Handler) fail(w http.ResponseWriter, op string, err error) {

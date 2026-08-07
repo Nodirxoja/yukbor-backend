@@ -1,8 +1,8 @@
 // API client. Talks to the real gateway by default; VITE_USE_MOCKS=true opts
 // into fixture data so the UI can be worked on with no backend running.
-import type { AdminStats, Order, User } from './types'
+import type { AdminStats, Order, Transaction, User } from './types'
 import { ApiError, loadSession } from './auth'
-import { computeStats, mockOrders, mockUsers } from '../mocks/data'
+import { computeStats, mockOrders, mockTransactions, mockUsers } from '../mocks/data'
 
 // Opt-IN, never opt-out: a build with no flag talks to the real backend.
 // The reverse default meant a production build silently served mock
@@ -59,4 +59,9 @@ export async function fetchOrders(): Promise<Order[]> {
 export async function fetchUsers(): Promise<User[]> {
   if (USE_MOCKS) return mockUsers
   return get<User[]>('/admin/users')
+}
+
+export async function fetchTransactions(): Promise<Transaction[]> {
+  if (USE_MOCKS) return mockTransactions
+  return get<Transaction[]>('/admin/transactions')
 }

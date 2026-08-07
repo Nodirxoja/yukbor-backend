@@ -128,6 +128,9 @@ export interface Transaction {
   status: TransactionStatus
   createdAt: string
   releasedAt: string | null
+  refundedAt?: string | null
+  /** Reference returned by the payment provider, e.g. payme_txn_9f2c… */
+  providerRef?: string | null
 }
 
 // GET /admin/stats — aggregated in SQL on the wallet service.

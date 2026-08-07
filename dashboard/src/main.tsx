@@ -1,5 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
 import { Theme } from '@radix-ui/themes'
 import '@radix-ui/themes/styles.css'
 import './styles.css'
@@ -16,10 +17,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       radius="large"
       panelBackground="translucent"
       hasBackground={false}
+      style={{ minHeight: '100vh' }}
     >
-      <Toaster>
-        <App />
-      </Toaster>
+      <BrowserRouter>
+        <Toaster>
+          <App />
+        </Toaster>
+      </BrowserRouter>
     </Theme>
   </React.StrictMode>,
 )

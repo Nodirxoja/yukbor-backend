@@ -65,6 +65,7 @@ func Routes(cfg config.Config) http.Handler {
 	mux.Handle("/admin/users", auth)
 	mux.Handle("/admin/orders", orders)
 	mux.Handle("/admin/stats", wallet)
+	mux.Handle("/admin/transactions", wallet)
 
 	return httpx.Wrap(cors(mux))
 }
