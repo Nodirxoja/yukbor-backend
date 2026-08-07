@@ -17,12 +17,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../dashboard"
 echo "==> removing any local dev env (it would be inlined into a public bundle)"
 rm -f .env.local .env.production.local
 
-echo "==> building"
+echo "==> building (real backend, mocks off)"
+# Stated explicitly, not left to a default: this build must never ship mocks.
+export VITE_USE_MOCKS=false
 if command -v npm >/dev/null 2>&1; then
   npm ci --silent && npm run build
 else
   # No node on the server: build in a throwaway container.
-  docker run --rm -v "$PWD":/app -w /app node:20-alpine \
+  docker run --rm -e VITE_USE_MOCKS=false -v "$PWD":/app -w /app node:20-alpine \
     sh -c 'npm ci --silent && npm run build'
 fi
 
@@ -38,5 +40,14 @@ if [ -n "$LEAKS" ]; then
   exit 1
 fi
 echo "    clean — no JWT in dist/"
+
+echo "==> checking no mock data was bundled"
+# Mock records carry names that exist nowhere else; finding one means the
+# build fell back to mock mode and would show fabricated orders as real.
+if grep -rq 'Dilnoza Yusupova' dist/ 2>/dev/null; then
+  echo "  BUILD REJECTED — mock data is in the bundle (VITE_USE_MOCKS was not false)."
+  exit 1
+fi
+echo "    clean — no mock records in dist/"
 
 du -sh dist | sed 's/^/    /'

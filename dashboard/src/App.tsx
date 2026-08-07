@@ -25,7 +25,10 @@ import { UsersTable } from './components/UsersTable'
 import { OrdersMap } from './components/OrdersMap'
 
 const POLL_MS = 10_000 // back-office realtime: polling is fine (plan §11)
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
+// Opt-IN, never opt-out: a build with no flag talks to the real backend.
+// The reverse default meant a production build silently served mock
+// orders and skipped sign-in entirely.
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
 
 export default function App() {
   // Mock mode has no backend to sign in against, so it skips the gate.

@@ -17,12 +17,16 @@ npm install
 npm run dev        # http://localhost:5173 — renders with mock data by default
 ```
 
-- **Mock mode (default)**: `VITE_USE_MOCKS` unset/`true` — the whole dashboard
-  renders without a backend (same pattern as the iOS mock services).
-- **Live mode**: `VITE_USE_MOCKS=false npm run dev` — calls the gateway via the
-  `/api` dev proxy (`vite.config.ts` → `http://localhost:8080`). Requires the
-  admin endpoints (`GET /admin/stats|orders|users`) and an admin JWT in
-  `VITE_ADMIN_TOKEN`.
+- **Live mode (default)**: calls the gateway via the `/api` dev proxy
+  (`vite.config.ts` → `http://localhost:8080`) and shows the sign-in screen.
+  Sign in with an `admin`-role account.
+- **Mock mode**: `VITE_USE_MOCKS=true npm run dev` — renders the whole
+  dashboard from fixtures with no backend, skipping sign-in.
+
+Mocks are opt-IN deliberately. With the reverse default, a production build
+that simply lacked the flag shipped fabricated orders and bypassed login
+entirely — `scripts/build-dashboard.sh` now sets the flag explicitly AND fails
+the build if a mock record reaches `dist/`.
 
 Structure:
 

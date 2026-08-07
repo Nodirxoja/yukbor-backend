@@ -1,11 +1,13 @@
-// API client with a mock mode (default ON) so the dashboard renders whole
-// without the backend. Set VITE_USE_MOCKS=false to hit the real gateway via
-// the /api dev proxy (see vite.config.ts).
+// API client. Talks to the real gateway by default; VITE_USE_MOCKS=true opts
+// into fixture data so the UI can be worked on with no backend running.
 import type { AdminStats, Order, User } from './types'
 import { ApiError, loadSession } from './auth'
 import { computeStats, mockOrders, mockUsers } from '../mocks/data'
 
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
+// Opt-IN, never opt-out: a build with no flag talks to the real backend.
+// The reverse default meant a production build silently served mock
+// orders and skipped sign-in entirely.
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
 
 /**
  * Every admin request carries the token of the signed-in administrator — the
