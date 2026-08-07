@@ -4,34 +4,38 @@ import {
   Badge,
   Box,
   Button,
-  Card,
+  Container,
   DropdownMenu,
   Flex,
-  Grid,
   Heading,
-  Tabs,
+  Spinner,
+  TabNav,
   Text,
 } from '@radix-ui/themes'
-import { ExitIcon, ReloadIcon } from '@radix-ui/react-icons'
+import { CubeIcon, DashboardIcon, ExitIcon, PersonIcon } from '@radix-ui/react-icons'
 import type { AdminStats, Order, User } from './api/types'
 import { ApiError, loadSession, logout as endSession } from './api/auth'
 import type { Session } from './api/auth'
 import { fetchOrders, fetchStats, fetchUsers } from './api/client'
 import { LoginScreen } from './components/LoginScreen'
 import { useToast } from './components/Toaster'
-import { StatsCards } from './components/StatsCards'
-import { OrdersTable } from './components/OrdersTable'
-import { UsersTable } from './components/UsersTable'
-import { OrdersMap } from './components/OrdersMap'
+import { OverviewSection } from './sections/OverviewSection'
+import { OrdersSection } from './sections/OrdersSection'
+import { UsersSection } from './sections/UsersSection'
 
 const POLL_MS = 10_000 // back-office realtime: polling is fine (plan §11)
 // Opt-IN, never opt-out: a build with no flag talks to the real backend.
-// The reverse default meant a production build silently served mock
-// orders and skipped sign-in entirely.
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
 
+type Tab = 'overview' | 'orders' | 'users'
+
+const TABS: { id: Tab; label: string; icon: typeof DashboardIcon }[] = [
+  { id: 'overview', label: 'Overview', icon: DashboardIcon },
+  { id: 'orders', label: 'Orders', icon: CubeIcon },
+  { id: 'users', label: 'Users', icon: PersonIcon },
+]
+
 export default function App() {
-  // Mock mode has no backend to sign in against, so it skips the gate.
   const [session, setSession] = useState<Session | null>(() => (USE_MOCKS ? null : loadSession()))
   const [authed, setAuthed] = useState(USE_MOCKS || Boolean(loadSession()))
 
@@ -57,14 +61,9 @@ export default function App() {
   )
 }
 
-function Dashboard({
-  session,
-  onSignedOut,
-}: {
-  session: Session | null
-  onSignedOut: () => void
-}) {
+function Dashboard({ session, onSignedOut }: { session: Session | null; onSignedOut: () => void }) {
   const toast = useToast()
+  const [tab, setTab] = useState<Tab>('overview')
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
   const [users, setUsers] = useState<User[]>([])
@@ -84,8 +83,8 @@ function Dashboard({
       } catch (e) {
         if (!alive()) return
         const err = e as ApiError
-        // An expired session should return you to the sign-in screen, not
-        // leave a dashboard quietly showing data that stopped updating.
+        // An expired session should return you to sign-in, not leave a
+        // dashboard quietly showing data that stopped updating.
         if (err.status === 401 || err.status === 403) {
           toast.error('Signed out', err.message)
           onSignedOut()
@@ -110,6 +109,12 @@ function Dashboard({
     }
   }, [load])
 
+  // Clicking an order on the map or in a list should take you to it.
+  const selectOrder = (id: string) => {
+    setSelectedOrderId(id)
+    if (tab === 'overview') setTab('orders')
+  }
+
   const initials = session?.user.fullName
     ? session.user.fullName
         .split(' ')
@@ -119,91 +124,112 @@ function Dashboard({
     : 'A'
 
   return (
-    <Box p="4" style={{ maxWidth: 1400, margin: '0 auto' }}>
-      <Flex justify="between" align="center" mb="4" gap="3">
-        <Flex direction="column">
-          <Heading size="6">YUK BOR</Heading>
-          <Text size="1" color="gray">
-            Admin dashboard
-          </Text>
-        </Flex>
+    <Box>
+      {/* Sticky bar: the identity and navigation stay put while a long table
+          scrolls underneath. */}
+      <Box
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+          backdropFilter: 'blur(12px)',
+          borderBottom: '1px solid var(--gray-a5)',
+        }}
+      >
+        <Container size="4" px="4">
+          <Flex justify="between" align="center" py="3" gap="3">
+            <Flex align="center" gap="4">
+              <Flex direction="column">
+                <Heading size="5">YUK BOR</Heading>
+                <Text size="1" color="gray">
+                  Admin dashboard
+                </Text>
+              </Flex>
+            </Flex>
 
-        <Flex align="center" gap="3">
-          <Flex align="center" gap="2">
-            {loading ? (
-              <Text size="1" color="gray">
-                <ReloadIcon />
-              </Text>
-            ) : null}
-            <Text size="1" color="gray">
-              {USE_MOCKS
-                ? 'mock data'
-                : lastSync
-                  ? `updated ${lastSync.toLocaleTimeString()}`
-                  : 'connecting'}
-            </Text>
+            <Flex align="center" gap="3">
+              <Flex align="center" gap="2">
+                {loading && <Spinner size="1" />}
+                <Text size="1" color="gray">
+                  {USE_MOCKS
+                    ? 'mock data'
+                    : lastSync
+                      ? `updated ${lastSync.toLocaleTimeString()}`
+                      : 'connecting'}
+                </Text>
+              </Flex>
+
+              {session && (
+                <DropdownMenu.Root>
+                  <DropdownMenu.Trigger>
+                    <Button variant="soft" color="gray">
+                      <Avatar size="1" fallback={initials} radius="full" />
+                      {session.user.fullName}
+                      <DropdownMenu.TriggerIcon />
+                    </Button>
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Content>
+                    <DropdownMenu.Label>
+                      <Flex direction="column" gap="1">
+                        <Text size="1">{session.user.phoneNumber}</Text>
+                        <Badge size="1" variant="soft">
+                          {session.user.role}
+                        </Badge>
+                      </Flex>
+                    </DropdownMenu.Label>
+                    <DropdownMenu.Separator />
+                    <DropdownMenu.Item color="red" onSelect={onSignedOut}>
+                      <ExitIcon />
+                      Sign out
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Root>
+              )}
+            </Flex>
           </Flex>
 
-          {session && (
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger>
-                <Button variant="soft" color="gray">
-                  <Avatar size="1" fallback={initials} radius="full" />
-                  {session.user.fullName}
-                  <DropdownMenu.TriggerIcon />
-                </Button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Content>
-                <DropdownMenu.Label>
-                  <Flex direction="column" gap="1">
-                    <Text size="1">{session.user.phoneNumber}</Text>
-                    <Badge size="1" variant="soft">
-                      {session.user.role}
+          <TabNav.Root>
+            {TABS.map(({ id, label, icon: Icon }) => (
+              <TabNav.Link key={id} active={tab === id} onClick={() => setTab(id)} href="#">
+                <Flex align="center" gap="2">
+                  <Icon />
+                  {label}
+                  {id === 'orders' && orders.length > 0 && (
+                    <Badge size="1" variant="soft" color="gray">
+                      {orders.length}
                     </Badge>
-                  </Flex>
-                </DropdownMenu.Label>
-                <DropdownMenu.Separator />
-                <DropdownMenu.Item color="red" onSelect={onSignedOut}>
-                  <ExitIcon />
-                  Sign out
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Root>
-          )}
-        </Flex>
-      </Flex>
+                  )}
+                  {id === 'users' && users.length > 0 && (
+                    <Badge size="1" variant="soft" color="gray">
+                      {users.length}
+                    </Badge>
+                  )}
+                </Flex>
+              </TabNav.Link>
+            ))}
+          </TabNav.Root>
+        </Container>
+      </Box>
 
-      {stats && (
-        <Box mb="4">
-          <StatsCards stats={stats} />
-        </Box>
-      )}
-
-      <Grid columns={{ initial: '1', md: '2' }} gap="4">
-        <Card style={{ height: 480 }}>
-          <OrdersMap orders={orders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} />
-        </Card>
-        <Card>
-          <Tabs.Root defaultValue="orders">
-            <Tabs.List>
-              <Tabs.Trigger value="orders">Orders ({orders.length})</Tabs.Trigger>
-              <Tabs.Trigger value="users">Users ({users.length})</Tabs.Trigger>
-            </Tabs.List>
-            <Box pt="3">
-              <Tabs.Content value="orders">
-                <OrdersTable
-                  orders={orders}
-                  selectedId={selectedOrderId}
-                  onSelect={setSelectedOrderId}
-                />
-              </Tabs.Content>
-              <Tabs.Content value="users">
-                <UsersTable users={users} />
-              </Tabs.Content>
-            </Box>
-          </Tabs.Root>
-        </Card>
-      </Grid>
+      <Container size="4" px="4" py="4">
+        {tab === 'overview' && (
+          <OverviewSection
+            stats={stats}
+            orders={orders}
+            users={users}
+            selectedId={selectedOrderId}
+            onSelect={selectOrder}
+          />
+        )}
+        {tab === 'orders' && (
+          <OrdersSection
+            orders={orders}
+            selectedId={selectedOrderId}
+            onSelect={setSelectedOrderId}
+          />
+        )}
+        {tab === 'users' && <UsersSection users={users} orders={orders} />}
+      </Container>
     </Box>
   )
 }

@@ -57,12 +57,46 @@ export interface Location {
   longitude: number
 }
 
+export type VehicleType =
+  | 'tractorTrailer'
+  | 'flatbed'
+  | 'refrigerated'
+  | 'tanker'
+  | 'dumpTruck'
+  | 'boxTruck'
+
+export type EquipmentType = 'excavator' | 'crane' | 'forklift' | 'loader'
+
+export interface CargoDetails {
+  cargoType: string
+  weightTons: number
+  requiresRefrigeration: boolean
+  requiredVehicleType: VehicleType
+  specialInstructions?: string | null
+}
+
+export interface EquipmentRequest {
+  equipmentType: EquipmentType
+  durationHours: number
+  notes?: string | null
+}
+
+export interface LaborRequest {
+  workersCount: number
+  durationHours: number
+  taskDescription?: string | null
+}
+
 export interface Order {
   id: string
   clientId: string
   clientName: string
   type: OrderType
   status: OrderStatus
+  // Present only for the legs an order actually has.
+  cargo?: CargoDetails | null
+  equipmentRequest?: EquipmentRequest | null
+  laborRequest?: LaborRequest | null
   pickupAddress: string
   pickupLocation: Location
   dropoffAddress: string
