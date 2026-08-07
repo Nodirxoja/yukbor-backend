@@ -17,6 +17,13 @@
 # it crash-loops the whole proxy. Caddy obtains certificates perfectly well
 # without a contact address; add one deliberately if you want expiry notices.
 
+# Serving the dashboard: repeated in three places below, so it is a snippet.
+(spa) {
+	root * /srv/dashboard
+	try_files {path} /index.html
+	file_server
+}
+
 {$SITE_ADDRESS} {
 	encode gzip
 
@@ -25,28 +32,55 @@
 		format console
 	}
 
-	# ---- admin surface -------------------------------------------------
-	# No basic auth and no injected token any more. The dashboard signs in as a
-	# real administrator through /auth/*, holds that session itself, and sends
-	# its own bearer token — so the browser can show who is signed in, expire
-	# the session, and sign out. Authorisation stays where it belongs: every
-	# /admin endpoint checks for the admin role in the service.
+	# ---- who is asking ---------------------------------------------------
+	# /orders and /users/* are BOTH API endpoints and dashboard routes: the app
+	# GETs /orders for JSON, while an operator opening /orders/{id} in a browser
+	# wants the page. The path alone cannot tell them apart, so the request has
+	# to — and a browser NAVIGATION is unmistakable.
+	#
+	# Sec-Fetch-Mode: navigate is sent by every current browser on a top-level
+	# navigation and by no API client. Accept: text/html is the fallback for
+	# anything older. Neither is sent by URLSession, fetch(), or curl, so the
+	# mobile app keeps getting JSON from exactly the same URLs.
+	@browserNavigation {
+		path /orders /orders/* /users /users/*
+		header Sec-Fetch-Mode navigate
+	}
+	handle @browserNavigation {
+		import spa
+	}
+
+	@browserAccept {
+		path /orders /orders/* /users /users/*
+		header Accept *text/html*
+	}
+	handle @browserAccept {
+		import spa
+	}
+
+	# ---- admin surface ---------------------------------------------------
+	# No basic auth and no injected token. The dashboard signs in as a real
+	# administrator through /auth/*, holds that session itself, and sends its
+	# own bearer token — so the browser can show who is signed in, expire the
+	# session, and sign out. Authorisation stays where it belongs: every /admin
+	# endpoint checks for the admin role in the service.
 	@admin path /admin/* /api/admin/*
 	handle @admin {
 		uri strip_prefix /api
 		reverse_proxy gateway:8080
 	}
 
-	# ---- the iOS app's surface ------------------------------------------
-	@api path /auth/* /users/* /orders /orders/* /wallet/* \
+	# ---- the iOS app's surface -------------------------------------------
+	@api path /auth/* /users /users/* /orders /orders/* /wallet/* \
 		/notifications /notifications/* /reviews /reviews/* \
 		/ws /health /health/*
 	handle @api {
 		reverse_proxy gateway:8080
 	}
 
-	# The dashboard calls /api/* by convention (same as the Vite dev proxy),
-	# so strip the prefix and forward. Admin paths were already handled above.
+	# The dashboard calls /api/* by convention (same as the Vite dev proxy), so
+	# strip the prefix and forward. This is why the dashboard's own data
+	# requests never collide with the routes above: they are all under /api.
 	handle /api/* {
 		uri strip_prefix /api
 		reverse_proxy gateway:8080
@@ -57,8 +91,6 @@
 	# until somebody signs in. try_files sends unknown paths to index.html so
 	# client-side routing works.
 	handle {
-		root * /srv/dashboard
-		try_files {path} /index.html
-		file_server
+		import spa
 	}
 }
