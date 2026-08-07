@@ -17,11 +17,13 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../dashboard"
 # Docker recreates a missing bind-mount source as root, so dist/ can end up
 # owned by root after a container restart — and then the build writes nothing
 # and says almost nothing about why. Check it up front.
-if [ -d dist ] && [ ! -w dist ]; then
-  echo "  dist/ is not writable by $(whoami) — Docker recreated it as root."
-  echo "  Fix with: sudo chown -R \$(id -u):\$(id -g) $(pwd)/dist"
-  exit 1
-fi
+for d in dist node_modules; do
+  if [ -e "$d" ] && [ ! -w "$d" ]; then
+    echo "  $d/ is not writable by $(whoami) — a root-run container created it."
+    echo "  Fix with: sudo chown -R \$(id -u):\$(id -g) $(pwd)"
+    exit 1
+  fi
+done
 
 echo "==> removing any local dev env (it would be inlined into a public bundle)"
 rm -f .env.local .env.production.local
@@ -37,7 +39,7 @@ else
   # reference in, the next deploy's rebuild — fails with permission denied.
   docker run --rm -e VITE_USE_MOCKS=false -e HOME=/tmp \
     -u "$(id -u):$(id -g)" -v "$PWD":/app -w /app node:20-alpine \
-    sh -c 'npm ci --silent && npm run build'
+    sh -c 'npm ci && npm run build'
 fi
 
 echo "==> checking the bundle for leaked credentials"
