@@ -56,10 +56,14 @@
 	}
 
 	# ---- the dashboard ---------------------------------------------------
-	# Static SPA. try_files sends unknown paths to index.html so client-side
-	# routing works; if dist/ is empty this simply 404s, which is what we want
-	# before the dashboard has been built.
+	# Static SPA, behind the same basic auth as the admin API. Gating only the
+	# API would leave the whole back-office UI — every label, every route, the
+	# shape of the business — served to anyone who found the address.
+	#
+	# try_files sends unknown paths to index.html so client-side routing works;
+	# if dist/ is empty this simply 404s, which is correct before a build.
 	handle {
+		import /etc/caddy/auth.conf
 		root * /srv/dashboard
 		try_files {path} /index.html
 		file_server
