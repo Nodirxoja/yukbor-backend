@@ -12,12 +12,26 @@ func TestSimulatedLicenseVerifier(t *testing.T) {
 	flatbed := models.VehicleFlatbed
 	tractor := models.VehicleTractorTrailer
 
-	// Even-ending PINFL → B,C,CE → approved for any truck.
+	// PINFL ending 6 or 8 → B,C,CE → approved for any truck.
 	res, err := v.VerifyDriverLicense(context.Background(), "u1", LicenseVerificationRequest{
-		PINFL: "12345678901234", VehicleType: &tractor,
+		PINFL: "12345678901238", VehicleType: &tractor,
 	})
 	if err != nil || res.Status != models.VerificationApproved {
-		t.Fatalf("even PINFL should be approved for CE, got %+v err=%v", res, err)
+		t.Fatalf("PINFL ending 8 should be approved for CE, got %+v err=%v", res, err)
+	}
+
+	// PINFL ending 0/2/4 → B,C → fine as a driver, refused a tractor-trailer.
+	res, err = v.VerifyDriverLicense(context.Background(), "u3", LicenseVerificationRequest{
+		PINFL: "12345678901234", RequiredCategory: "C",
+	})
+	if err != nil || res.Status != models.VerificationApproved {
+		t.Fatalf("PINFL ending 4 must register fine as a driver, got %+v err=%v", res, err)
+	}
+	res, err = v.VerifyDriverLicense(context.Background(), "u3", LicenseVerificationRequest{
+		PINFL: "12345678901234", VehicleType: &tractor,
+	})
+	if err != nil || res.Status != models.VerificationRejected {
+		t.Fatalf("PINFL ending 4 holds C but not CE and must be refused a tractor-trailer, got %+v", res)
 	}
 
 	// Odd-ending PINFL → only B → rejected for trucks.

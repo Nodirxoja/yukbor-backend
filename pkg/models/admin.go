@@ -39,3 +39,33 @@ type RatingUpdate struct {
 	Rating float64 `json:"rating"`
 	Count  int     `json:"count"`
 }
+
+// AdminStats backs the dashboard's stats row (plan §11).
+//
+// The money figures are aggregated in the wallet's own SQL; the counts come
+// from orders and auth over internal HTTP. Wallet could read the other schemas
+// directly — it is one database — but services owning their own data is the
+// property that makes splitting the repo later a non-event, and a back-office
+// screen polled every 10s can afford two extra calls.
+type AdminStats struct {
+	TotalOrders     int `json:"totalOrders"`
+	ActiveOrders    int `json:"activeOrders"`
+	CompletedOrders int `json:"completedOrders"`
+	RegisteredUsers int `json:"registeredUsers"`
+
+	CreditedToExecutors string `json:"creditedToExecutors"` // Σ released (amount − commission)
+	ServiceFeesCharged  string `json:"serviceFeesCharged"`  // Σ commission of released
+	HeldInEscrow        string `json:"heldInEscrow"`        // Σ held amounts
+}
+
+// OrderStats is GET /internal/orders/stats.
+type OrderStats struct {
+	Total     int `json:"total"`
+	Active    int `json:"active"`
+	Completed int `json:"completed"`
+}
+
+// UserStats is GET /internal/users/stats.
+type UserStats struct {
+	Total int `json:"total"`
+}

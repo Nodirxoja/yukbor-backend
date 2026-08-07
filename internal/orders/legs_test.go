@@ -32,11 +32,28 @@ func TestCanTransition(t *testing.T) {
 	if !CanTransition(models.StatusAccepted, models.StatusLoadingInProgress) {
 		t.Error("accepted → loadingInProgress must be allowed")
 	}
+	// Skipping ahead is fine — a short labor job goes straight to delivered.
+	if !CanTransition(models.StatusAccepted, models.StatusDelivered) {
+		t.Error("accepted → delivered must be allowed (forward skip)")
+	}
 	if CanTransition(models.StatusDelivered, models.StatusInTransit) {
 		t.Error("backward transition must be rejected")
 	}
 	if CanTransition(models.StatusCompleted, models.StatusPublished) {
 		t.Error("completed is terminal")
+	}
+	// The invariant that actually protects money: nothing goes backwards.
+	order := []models.OrderStatus{
+		models.StatusPublished, models.StatusMatched, models.StatusAccepted,
+		models.StatusInProgress, models.StatusLoadingInProgress,
+		models.StatusInTransit, models.StatusDelivered, models.StatusCompleted,
+	}
+	for i, from := range order {
+		for _, to := range order[:i] {
+			if CanTransition(from, to) {
+				t.Errorf("backward transition %s → %s must be rejected", from, to)
+			}
+		}
 	}
 }
 

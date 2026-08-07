@@ -87,6 +87,33 @@ func TestSimulatedFullName(t *testing.T) {
 	}
 }
 
+// Every bucket of the simulated registry must be reachable, otherwise a rule
+// exists that can never fire on stage.
+func TestLicenseCategoryBuckets(t *testing.T) {
+	want := map[byte][]string{
+		'1': {"B"}, '3': {"B"}, '5': {"B"}, '7': {"B"}, '9': {"B"},
+		'0': {"B", "C"}, '2': {"B", "C"}, '4': {"B", "C"},
+		'6': {"B", "C", "CE"}, '8': {"B", "C", "CE"},
+	}
+	seen := map[string]bool{}
+	for digit, expected := range want {
+		pinfl := "1234567890123" + string(digit)
+		got := LicenseCategoriesFor(pinfl)
+		if len(got) != len(expected) {
+			t.Fatalf("pinfl ending %c: got %v, want %v", digit, got, expected)
+		}
+		for i := range got {
+			if got[i] != expected[i] {
+				t.Fatalf("pinfl ending %c: got %v, want %v", digit, got, expected)
+			}
+		}
+		seen[strings.Join(got, ",")] = true
+	}
+	if len(seen) != 3 {
+		t.Errorf("expected 3 distinct licence outcomes, got %d: %v", len(seen), seen)
+	}
+}
+
 func TestRequiredCategoryForRole(t *testing.T) {
 	cases := map[models.UserRole]string{
 		models.RoleDriver:            "C",
@@ -108,8 +135,8 @@ func TestRequiredCategoryForRole(t *testing.T) {
 // VehicleType. Both must reach the same verdict for the same licence.
 func TestLicenseGateBothForms(t *testing.T) {
 	v := SimulatedLicenseVerifier{}
-	oddPINFL := "32109876543211"  // → categories ["B"]
-	evenPINFL := "32109876543212" // → ["B","C","CE"]
+	oddPINFL := "32109876543211"  // → ["B"]
+	evenPINFL := "32109876543218" // → ["B","C","CE"]
 	tractor := models.VehicleTractorTrailer
 
 	byRole, _ := v.VerifyDriverLicense(t.Context(), "", LicenseVerificationRequest{

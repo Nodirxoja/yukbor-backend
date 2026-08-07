@@ -44,6 +44,20 @@ func AuthedRole(secret []byte, roles []string, next http.HandlerFunc) http.Handl
 	})
 }
 
+// AuthedOrInternal accepts either a user's access token or the shared internal
+// token. The escrow endpoints need this: the contract exposes them publicly
+// (§4), but in practice the orders service is what calls them, on behalf of a
+// user whose token it does not hold.
+func AuthedOrInternal(secret []byte, internalToken string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if internalToken != "" && r.Header.Get("X-Internal-Token") == internalToken {
+			next(w, r)
+			return
+		}
+		Authed(secret, next)(w, r)
+	}
+}
+
 // WithClaims stores verified claims on a context (also used by the WS handler,
 // which authenticates via a query parameter rather than a header).
 func WithClaims(ctx context.Context, c jwtx.Claims) context.Context {

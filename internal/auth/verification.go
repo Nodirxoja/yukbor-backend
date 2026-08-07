@@ -135,33 +135,42 @@ type LicenseResult struct {
 // type wins, otherwise the role-level requirement passed by the caller.
 func (r LicenseVerificationRequest) requiredCategory() string {
 	if r.VehicleType != nil {
-		return RequiredLicenseCategory(*r.VehicleType)
+		return models.RequiredLicenseCategory(*r.VehicleType)
 	}
 	return r.RequiredCategory
 }
 
-// RequiredLicenseCategory maps vehicle types to the license category a driver
-// must hold (Uzbekistan categories, Vienna-convention style).
-func RequiredLicenseCategory(v models.VehicleType) string {
-	switch v {
-	case models.VehicleTractorTrailer:
-		return "CE" // truck + trailer
+// SimulatedLicenseVerifier imitates the government license registry with
+// deterministic outcomes, keyed on the LAST digit of the PINFL so every
+// enforcement path can be shown on stage (plan §10):
+//
+//	1,3,5,7,9 → ["B"]           car only      → REJECTED at registration
+//	0,2,4     → ["B","C"]       rigid trucks  → registers fine, but REFUSED a
+//	                                            tractor-trailer load on accept
+//	6,8       → ["B","C","CE"]  everything    → no restrictions
+//
+// The middle bucket is what makes the second gate real: without a driver who
+// holds C but not CE, the accept-time check could never fire, and a rule that
+// can never fire is not a rule. The category logic itself is genuine and
+// survives the swap to the production registry client — only the lookup is
+// imitated.
+type SimulatedLicenseVerifier struct{}
+
+// LicenseCategoriesFor is the simulated registry lookup, exposed so the seed
+// script can pick PINFLs that produce the drivers a demo needs.
+func LicenseCategoriesFor(pinfl string) []string {
+	if pinfl == "" {
+		return []string{"B", "C", "CE"}
+	}
+	switch last := pinfl[len(pinfl)-1] - '0'; {
+	case last%2 == 1:
+		return []string{"B"}
+	case last >= 6:
+		return []string{"B", "C", "CE"}
 	default:
-		return "C" // trucks > 3.5t: flatbed, refrigerated, tanker, dumpTruck, boxTruck
+		return []string{"B", "C"}
 	}
 }
-
-// SimulatedLicenseVerifier imitates the government license registry with
-// deterministic outcomes so both paths are demoable (see plan §10):
-//
-//   - PINFL ending in an ODD digit  → license carries only ["B"]
-//     → category check fails → REJECTED (LICENSE_CATEGORY_MISMATCH)
-//   - PINFL ending in an EVEN digit → ["B","C","CE"] → APPROVED,
-//     proceed to truck/equipment selection
-//
-// The category rules below are real and survive the swap to the production
-// registry client.
-type SimulatedLicenseVerifier struct{}
 
 func (SimulatedLicenseVerifier) VerifyDriverLicense(ctx context.Context, _ string, req LicenseVerificationRequest) (LicenseResult, error) {
 	// Realistic registry latency.
@@ -170,10 +179,7 @@ func (SimulatedLicenseVerifier) VerifyDriverLicense(ctx context.Context, _ strin
 	case <-ctx.Done():
 		return LicenseResult{}, ctx.Err()
 	}
-	categories := []string{"B", "C", "CE"}
-	if n := len(req.PINFL); n > 0 && (req.PINFL[n-1]-'0')%2 == 1 {
-		categories = []string{"B"} // demo trigger: not qualified for trucks
-	}
+	categories := LicenseCategoriesFor(req.PINFL)
 
 	// The registry issues the licence number and the plate of the vehicle it
 	// is registered to; both are derived from the PINFL so they stay stable

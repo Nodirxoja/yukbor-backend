@@ -26,10 +26,18 @@ func LegsFor(t models.OrderType, hasEquipment, hasLabor bool) []models.Leg {
 
 // nextAllowed defines forward-only status transitions per leg. Executors may
 // only move along these edges; cancelled/disputed are handled separately.
+//
+// Skipping ahead is allowed, going back is not. That distinction is deliberate:
+// the invariant worth enforcing is that a leg never moves backwards (which
+// would let an executor un-deliver a load after being paid). Insisting that
+// every intermediate state be visited buys nothing and breaks real usage — a
+// short labor job legitimately goes accepted → delivered, and a driver who
+// forgets to tap "loading" should not be stuck.
 var nextAllowed = map[models.OrderStatus][]models.OrderStatus{
-	models.StatusPublished:         {models.StatusMatched, models.StatusAccepted},
-	models.StatusMatched:           {models.StatusAccepted},
-	models.StatusAccepted:          {models.StatusInProgress, models.StatusLoadingInProgress},
+	models.StatusPublished: {models.StatusMatched, models.StatusAccepted},
+	models.StatusMatched:   {models.StatusAccepted},
+	models.StatusAccepted: {models.StatusInProgress, models.StatusLoadingInProgress,
+		models.StatusInTransit, models.StatusDelivered},
 	models.StatusInProgress:        {models.StatusLoadingInProgress, models.StatusInTransit, models.StatusDelivered},
 	models.StatusLoadingInProgress: {models.StatusInTransit, models.StatusDelivered},
 	models.StatusInTransit:         {models.StatusDelivered},

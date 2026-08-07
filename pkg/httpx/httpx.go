@@ -47,6 +47,14 @@ func ReadJSON(r *http.Request, v any) error {
 	return dec.Decode(v)
 }
 
+// ReadJSONLoose decodes while ignoring unknown fields. Use it where the client
+// legitimately sends more than we read — POST /orders is specified as "an Order
+// without id/status/createdAt/updatedAt", and an app that posts the whole
+// object must not get a 400 for it.
+func ReadJSONLoose(r *http.Request, v any) error {
+	return json.NewDecoder(r.Body).Decode(v)
+}
+
 // Health returns a handler for GET /health.
 func Health(service string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {

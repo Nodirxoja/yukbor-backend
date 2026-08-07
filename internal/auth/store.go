@@ -350,6 +350,14 @@ func (s *Store) ListUsers(ctx context.Context, role string) ([]UserRecord, error
 	return out, rows.Err()
 }
 
+// CountUsers backs the dashboard's "registered users" tile via the wallet's
+// /admin/stats aggregation.
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM auth.users`).Scan(&n)
+	return n, err
+}
+
 // ---- Refresh tokens ---------------------------------------------------
 
 func hashToken(token string) string {

@@ -70,6 +70,8 @@ func (h *Handler) Routes() http.Handler {
 		httpx.AuthedRole(secret, []string{string(models.RoleAdmin)}, h.adminUsers))
 
 	// Service-to-service
+	mux.HandleFunc("GET /internal/users/stats",
+		httpx.InternalOnly(h.cfg.InternalToken, h.internalUserStats))
 	mux.HandleFunc("GET /internal/users/{id}",
 		httpx.InternalOnly(h.cfg.InternalToken, h.internalUser))
 	mux.HandleFunc("POST /internal/users/{id}/rating",
@@ -494,6 +496,15 @@ func (h *Handler) internalUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, detail(*user))
+}
+
+func (h *Handler) internalUserStats(w http.ResponseWriter, r *http.Request) {
+	total, err := h.store.CountUsers(r.Context())
+	if err != nil {
+		h.fail(w, "count users", err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, models.UserStats{Total: total})
 }
 
 func (h *Handler) internalRating(w http.ResponseWriter, r *http.Request) {
