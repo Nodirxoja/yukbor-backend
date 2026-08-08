@@ -7,6 +7,10 @@ special-equipment providers, and labor teams in Uzbekistan.
 - **Contract**: [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md) — the iOS ⇄ backend contract, frozen
 - **Implementation notes**: [`docs/BACKEND_NOTES.md`](docs/BACKEND_NOTES.md) — where the backend
   *adds* to the contract, decisions taken where it was silent, and the demo triggers
+- **Infrastructure**: [`docs/INFRASTRUCTURE.md`](docs/INFRASTRUCTURE.md) — what is actually deployed,
+  where, and how to operate it
+- **API reference**: [`docs/openapi.yaml`](docs/openapi.yaml), served interactively at
+  [`/docs`](https://yukbor.duckdns.org/docs) on the live deployment
 
 ## Services
 
