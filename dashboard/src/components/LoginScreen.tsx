@@ -64,16 +64,19 @@ export function LoginScreen({ onSignedIn }: { onSignedIn: (s: Session) => void }
   return (
     <Flex align="center" justify="center" style={{ minHeight: '100vh' }} p="4">
       <Box style={{ width: '100%', maxWidth: 400 }}>
-        <Flex direction="column" align="center" gap="3" mb="5">
-          {/* The mark carries the wordmark already, so there is no heading
-              here — repeating "YUK BOR" underneath would just say it twice. */}
-          <img
-            src="/logo.png"
-            alt="YUK BOR"
-            width={84}
-            height={84}
-            className="brand-mark brand-mark-lg"
-          />
+        <Flex direction="column" align="center" gap="2" mb="5">
+          <Flex align="center" gap="3">
+            <img
+              src="/logo.png"
+              alt=""
+              width={56}
+              height={56}
+              className="brand-mark brand-mark-lg"
+            />
+            <Heading size="7" weight="bold">
+              YUK BOR
+            </Heading>
+          </Flex>
           <Text size="2" color="gray">
             Admin dashboard
           </Text>

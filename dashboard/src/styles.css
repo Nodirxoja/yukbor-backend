@@ -504,3 +504,10 @@ body {
     transform: none;
   }
 }
+
+/* The wordmark sits beside the mark on one line; keeping it from wrapping
+   matters because the sidebar animates its width when collapsing. */
+.brand-wordmark {
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
