@@ -72,17 +72,27 @@ export function AppShell({
         style={{ width: collapsed ? 64 : 232 }}
       >
         <Flex direction="column" gap="1" p="3" style={{ height: '100%' }}>
-          <Flex align="center" justify="between" mb="4" px="1">
-            {!collapsed && (
-              <Flex direction="column">
-                <Text size="3" weight="bold">
-                  YUK BOR
-                </Text>
-                <Text size="1" color="gray">
-                  Operations
-                </Text>
+          <Flex align="center" justify="between" mb="4" px="1" gap="2">
+            {/* The mark links home, which is what people expect of a logo in
+                the top-left. Collapsed it stands alone; expanded it is paired
+                with "Operations" rather than the wordmark, which the mark
+                already carries. */}
+            <NavLink to="/" className="brand-link">
+              <Flex align="center" gap="2">
+                <img
+                  src="/logo.png"
+                  alt="YUK BOR"
+                  width={collapsed ? 28 : 32}
+                  height={collapsed ? 28 : 32}
+                  className="brand-mark"
+                />
+                {!collapsed && (
+                  <Text size="1" color="gray">
+                    Operations
+                  </Text>
+                )}
               </Flex>
-            )}
+            </NavLink>
             <IconButton
               size="1"
               variant="ghost"

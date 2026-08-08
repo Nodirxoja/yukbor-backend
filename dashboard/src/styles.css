@@ -446,3 +446,61 @@ body {
     transform: none;
   }
 }
+
+/* ---- brand mark -------------------------------------------------------
+   The logo is a rounded-square app icon. Rounding it to Radix's own radius
+   and giving it the same shadow language as a Card stops it reading as a
+   pasted-in bitmap next to native components. */
+.brand-mark {
+  display: block;
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-2);
+  transition:
+    transform var(--motion-base) var(--ease-spring),
+    box-shadow var(--motion-base) var(--ease-out-expo),
+    width var(--motion-base) var(--ease-out-expo),
+    height var(--motion-base) var(--ease-out-expo);
+}
+
+.brand-link {
+  text-decoration: none;
+  border-radius: var(--radius-3);
+}
+
+.brand-link:hover .brand-mark {
+  transform: scale(1.06);
+  box-shadow: var(--shadow-4);
+}
+
+.brand-link:active .brand-mark {
+  transform: scale(0.98);
+}
+
+/* On the sign-in screen the mark is the only thing above the fold, so it
+   gets a proper entrance rather than simply being there. */
+.brand-mark-lg {
+  border-radius: var(--radius-5);
+  box-shadow: var(--shadow-5);
+  animation: mark-in 520ms var(--ease-spring) both;
+}
+
+@keyframes mark-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-mark-lg {
+    animation: none;
+  }
+  .brand-link:hover .brand-mark,
+  .brand-link:active .brand-mark {
+    transform: none;
+  }
+}
